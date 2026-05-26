@@ -1,0 +1,8 @@
+# Ignore everything except the core files
+*
+!.gitignore
+!docling_parse.py
+!build-reader.js
+!paper-reader.html
+!README.md
+!workflow-spec.md
