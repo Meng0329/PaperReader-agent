@@ -1,0 +1,2687 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PaperReader — Agent 交互的论文阅读器</title>
+<style>
+/* === Reset & Base === */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f8f9fa;
+  --surface: #ffffff;
+  --border: #e0e4e8;
+  --text: #1a1a2e;
+  --text-secondary: #6b7280;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-light: #dbeafe;
+  --tag-bg: #f0f4ff;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08);
+  --radius: 8px;
+  --sidebar-width: 320px;
+  --toolbar-height: 48px;
+  --header-height: 52px;
+  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "STSongti", serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "PingFang SC", sans-serif;
+  --font-mono: "SF Mono", "Fira Code", "JetBrains Mono", "Cascadia Code", "Consolas", monospace;
+}
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  overflow: hidden;
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+/* === Layout === */
+#app { display: flex; height: 100vh; }
+
+/* === Sidebar === */
+#sidebar {
+  width: var(--sidebar-width);
+  min-width: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.25s ease;
+}
+#sidebar.collapsed {
+  width: 0;
+  border-right-color: transparent;
+}
+/* Expand grip handle */
+#sidebar-grip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 20px;
+  height: 100vh;
+  z-index: 100;
+  cursor: ew-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+}
+#sidebar-grip.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+#sidebar-grip .grip-inner {
+  width: 4px;
+  height: 48px;
+  background: #d0d5dd;
+  border-radius: 3px;
+  transition: background 0.15s ease, height 0.15s ease;
+}
+#sidebar-grip:hover .grip-inner {
+  background: var(--accent);
+  height: 56px;
+}
+#sidebar-header {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#sidebar-header h1 {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+#sidebar-header .subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+#stats-bar {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+#stats-bar .stat { display: flex; align-items: center; gap: 3px; }
+.stat-num { font-weight: 600; color: var(--text); }
+
+#search-box {
+  margin: 10px 16px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+  flex-shrink: 0;
+}
+#search-box:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-light); }
+
+#year-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 16px 8px;
+  flex-shrink: 0;
+}
+.yf-pill {
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.12s;
+  line-height: 1.6;
+}
+.yf-pill:hover { border-color: var(--accent); color: var(--accent); }
+.yf-pill.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+#paper-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.paper-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background 0.1s, border-color 0.1s;
+  position: relative;
+}
+.paper-item:hover { background: #f0f4ff; }
+.paper-item.active {
+  background: var(--accent-light);
+  border-left-color: var(--accent);
+}
+.paper-item .pi-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.paper-item .pi-status { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+.paper-item .pi-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 3px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.paper-item .pi-year {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #eef2ff;
+  font-size: 10px;
+  font-weight: 600;
+  color: #4f46e5;
+}
+.paper-item .pi-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+.paper-item .pi-badge {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  background: #f3f4f6;
+  color: var(--text-secondary);
+}
+
+/* === Main Content === */
+#main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* Welcome */
+#welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 40px;
+}
+#welcome h2 { font-size: 20px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+#welcome p { max-width: 420px; line-height: 1.7; }
+#welcome .keys { margin-top: 16px; font-size: 12px; }
+#welcome .keys kbd {
+  display: inline-block;
+  padding: 2px 7px;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 11px;
+}
+
+/* Toolbar */
+#toolbar {
+  height: var(--toolbar-height);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  gap: 12px;
+}
+#toolbar .mode-group {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+#toolbar .mode-btn {
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.1s;
+}
+#toolbar .mode-btn:not(:last-child) { border-right: 1px solid var(--border); }
+#toolbar .mode-btn:hover { background: #f3f4f6; }
+#toolbar .mode-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+#toolbar .paper-nav-title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 8px;
+}
+
+/* Reader */
+#reader {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px 40px 60px;
+  background: var(--surface);
+  font-family: var(--font-serif);
+}
+#reader.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+/* === Paper Content Styling === */
+.reader-metadata {
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.reader-metadata h2 { font-size: 20px; font-weight: 700; line-height: 1.35; margin-bottom: 6px; }
+.reader-metadata .rm-authors { font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
+.reader-metadata .rm-source { font-size: 12px; color: var(--text-secondary); }
+.reader-metadata .rm-source a { color: var(--accent); text-decoration: none; }
+.reader-metadata .rm-source a:hover { text-decoration: underline; }
+
+/* Abstract & Glossary (collapsible pre-content blocks) */
+.reader-prelude {
+  margin-bottom: 8px;
+}
+.reader-prelude summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+  background: #f8f9fb;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  user-select: none;
+  transition: background 0.12s;
+}
+.reader-prelude summary:hover { background: #eef1f5; }
+.reader-prelude summary::marker { color: var(--text-secondary); }
+.reader-prelude .prelude-body {
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+.reader-prelude .prelude-body p { margin-bottom: 6px; }
+.reader-prelude .prelude-body p:last-child { margin-bottom: 0; }
+/* Glossary table inside prelude */
+.reader-prelude .prelude-body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.reader-prelude .prelude-body th,
+.reader-prelude .prelude-body td {
+  padding: 4px 8px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+  vertical-align: top;
+}
+.reader-prelude .prelude-body th {
+  font-weight: 600;
+  color: var(--text);
+  background: #f8f9fb;
+}
+.reader-prelude .prelude-body tr:last-child td { border-bottom: none; }
+
+.block { margin-bottom: 4px; }
+.block.source-anchor {
+  font-size: 11px;
+  color: #9ca3af;
+  padding: 2px 0;
+  margin-bottom: 0;
+}
+.block.source-anchor .sa-label {
+  display: inline-block;
+  background: #f3f4f6;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+.block.section-heading {
+  margin: 20px 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #eef2ff;
+}
+.block.section-heading h3 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.block.section-heading h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.block.subsection-heading {
+  margin: 16px 0 6px;
+}
+.block.subsection-heading h4 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.block.subsection-heading h5 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Bilingual block */
+.block.bilingual { margin-bottom: 12px; }
+.block.bilingual .bi-source {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.bi-dual {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  border: 1px solid #eef2ff;
+  border-radius: 6px;
+  padding: 12px 14px;
+  background: #fafbff;
+}
+.bi-dual .bi-col { min-width: 0; }
+.bi-col-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.bi-col p { margin-bottom: 6px; }
+.bi-col p:last-child { margin-bottom: 0; }
+
+.bi-original-only {
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent);
+  background: #fafbff;
+  border-radius: 0 6px 6px 0;
+}
+.bi-chinese-only {
+  padding: 8px 12px;
+  border-left: 3px solid #10b981;
+  background: #f0fdf4;
+  border-radius: 0 6px 6px 0;
+}
+
+/* Image block */
+.block.image-block { margin: 20px 0; }
+.image-block img {
+  max-width: 100%;
+  max-height: 70vh;
+  height: auto;
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+}
+.image-block .img-caption {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.image-block .img-caption .cap-en { color: var(--text); }
+.image-block .img-caption .cap-zh { color: var(--text-secondary); }
+
+/* Table block */
+.block.table-block { margin: 16px 0; overflow-x: auto; }
+.table-block table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table-block th, .table-block td {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+.table-block th { background: #f8fafc; font-weight: 600; font-size: 12px; }
+.table-block tr:nth-child(even) { background: #fafbfc; }
+
+/* Plain text block */
+.block.plain { margin-bottom: 8px; }
+.block.plain p { margin-bottom: 6px; }
+.block.separator {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+
+/* Reading notes */
+.block.reading-notes {
+  margin-top: 24px;
+  padding: 16px 20px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius);
+}
+.block.reading-notes h3 { font-size: 14px; margin-bottom: 8px; color: #92400e; }
+.block.reading-notes ol, .block.reading-notes ul { padding-left: 20px; }
+.block.reading-notes li { margin-bottom: 4px; font-size: 13px; }
+
+/* Lists in content */
+.bi-col ul, .bi-col ol { padding-left: 20px; margin-bottom: 6px; }
+.bi-col li { margin-bottom: 2px; }
+.bi-col code {
+  font-size: 12px;
+  background: #f1f3f5;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+}
+
+/* List blocks */
+.block.list-block { margin: 0.4em 0; }
+.block.list-block ul, .block.list-block ol {
+  padding-left: 1.5em;
+  margin: 0.3em 0;
+}
+.block.list-block li {
+  margin-bottom: 0.25em;
+  line-height: 1.7;
+}
+
+/* Code blocks */
+.block.code-block { margin: 0.8em 0; }
+.block.code-block pre {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  padding: 16px 20px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 2;
+}
+
+/* Blockquotes */
+.block.quote-block { margin: 0.8em 0; }
+.block.quote-block blockquote {
+  border-left: 4px solid var(--accent);
+  background: #f8fafc;
+  padding: 10px 16px;
+  margin: 0;
+  border-radius: 0 8px 8px 0;
+  color: #374151;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.block.quote-block blockquote p { margin-bottom: 0.4em; }
+.block.quote-block blockquote p:last-child { margin-bottom: 0; }
+
+/* Paragraph spacing */
+.block.plain p { margin-bottom: 0.6em; }
+
+/* Inline code */
+p code, li code, .block.plain code {
+  font-size: 13px;
+  background: #f1f3f5;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+}
+
+/* Loading spinner */
+.loading-dots::after {
+  content: "...";
+  animation: dots 1.5s steps(4, end) infinite;
+}
+@keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+
+/* Lightbox */
+#lightbox {
+  display: none;
+  position: fixed;
+  z-index: 2000;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+#lightbox.show { display: flex; }
+#lightbox-img {
+  max-width: 95vw;
+  max-height: 95vh;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+}
+#lightbox-close {
+  position: fixed;
+  top: 16px;
+  right: 24px;
+  color: #fff;
+  font-size: 32px;
+  font-weight: 300;
+  cursor: pointer;
+  opacity: 0.7;
+  line-height: 1;
+  z-index: 2001;
+  transition: opacity 0.15s;
+}
+#lightbox-close:hover { opacity: 1; }
+
+/* Image click zoom */
+.image-block img { cursor: zoom-in; }
+
+/* Error toast */
+#error-toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 10px 20px;
+  border-radius: var(--radius);
+  border: 1px solid #fca5a5;
+  font-size: 13px;
+  display: none;
+  z-index: 1000;
+  max-width: 80vw;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+#error-toast.show { display: block; }
+
+/* File protocol warning */
+#file-warning {
+  display: none;
+  padding: 8px 16px;
+  background: #fef3c7;
+  border-bottom: 1px solid #fde68a;
+  font-size: 12px;
+  color: #92400e;
+  text-align: center;
+}
+#file-warning code {
+  background: #fef9c3;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: "SF Mono", monospace;
+  font-size: 11px;
+}
+
+/* Scrollbar */
+#paper-list::-webkit-scrollbar, #reader::-webkit-scrollbar { width: 6px; }
+#paper-list::-webkit-scrollbar-track, #reader::-webkit-scrollbar-track { background: transparent; }
+#paper-list::-webkit-scrollbar-thumb, #reader::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+#paper-list::-webkit-scrollbar-thumb:hover, #reader::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  #sidebar { width: 100%; min-width: auto; max-height: 40vh; border-right: none; border-bottom: 1px solid var(--border); }
+  #app { flex-direction: column; }
+  #reader { padding: 16px; }
+  .bi-dual { grid-template-columns: 1fr; }
+}
+
+/* ===== Notes Feature ===== */
+
+/* Floating selection toolbar */
+#sel-toolbar {
+  position: fixed;
+  display: none;
+  z-index: 1000;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+  padding: 4px 6px;
+  transform: translateY(-100%);
+  margin-top: -8px;
+  white-space: nowrap;
+}
+#sel-toolbar.visible { display: flex; align-items: center; gap: 4px; }
+#sel-toolbar button {
+  border: none;
+  background: transparent;
+  padding: 4px 10px;
+  font-size: 13px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #333;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+#sel-toolbar button:hover { background: #f0f0f0; }
+
+/* Note highlights */
+.note-hl {
+  background: #FFF3CD;
+  border-radius: 2px;
+  padding: 0 1px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.note-hl:hover { background: #FFE082; }
+.note-hl.active-hl { background: #FFCA28; }
+.sel-hl {
+  background: #C8E6C9;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* Notes side panel */
+#notes-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 320px;
+  height: 100%;
+  background: #fff;
+  box-shadow: -4px 0 16px rgba(0,0,0,0.1);
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.2s ease;
+}
+#notes-panel.open { transform: translateX(0); }
+
+/* Panel tab (collapsed state) */
+#notes-tab {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  z-index: 899;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  padding: 10px 6px;
+  cursor: pointer;
+  font-size: 14px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  user-select: none;
+  transition: opacity 0.15s;
+  color: var(--text-secondary);
+}
+#notes-tab:hover { background: var(--accent-light); color: var(--accent); }
+#notes-tab .badge {
+  display: inline-block;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 10px;
+  padding: 0 6px;
+  font-size: 11px;
+  writing-mode: horizontal-tb;
+  margin-bottom: 4px;
+}
+
+/* Panel header */
+#notes-panel .np-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#notes-panel .np-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+#notes-panel .np-header .np-close {
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+#notes-panel .np-header .np-close:hover { background: #f0f0f0; }
+
+/* New note input area */
+#notes-panel .np-new {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#notes-panel .np-new .np-source-preview {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #f8f9fa;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+#notes-panel .np-new textarea {
+  width: 100%;
+  min-height: 80px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+#notes-panel .np-new textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-light);
+}
+#notes-panel .np-new .np-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+#notes-panel .np-new .np-actions button {
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text-secondary);
+}
+#notes-panel .np-new .np-actions .np-save {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+#notes-panel .np-new .np-actions .np-save:hover { opacity: 0.9; }
+
+/* Note list */
+#notes-panel .np-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+.np-list-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.12s;
+  position: relative;
+}
+.np-list-item:hover { border-color: var(--accent); }
+.np-list-item.active-note { border-color: var(--accent); background: #FFFDE7; }
+.np-list-item .npl-source {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.np-list-item .npl-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #333;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.np-list-item .npl-time {
+  font-size: 11px;
+  color: #aaa;
+  margin-top: 4px;
+}
+.np-list-item .npl-del {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  border: none;
+  background: transparent;
+  color: #ccc;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  display: none;
+}
+.np-list-item:hover .npl-del { display: block; }
+.np-list-item .npl-del:hover { color: #e74c3c; background: #fce4e4; }
+
+/* Panel footer (export) */
+#notes-panel .np-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  text-align: center;
+}
+#notes-panel .np-footer button {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 12px;
+  border-radius: 4px;
+}
+#notes-panel .np-footer button:hover { background: #f0f0f0; color: var(--accent); }
+
+/* Toast notification */
+#note-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #333;
+  color: #fff;
+  padding: 8px 20px;
+  border-radius: 20px;
+  font-size: 13px;
+  z-index: 2000;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+#note-toast.show { opacity: 1; }
+
+/* Math rendering container */
+.math-render { display: inline; }
+.math-render.math-display {
+  display: block;
+  margin: 8px 0;
+  text-align: center;
+}
+.math-render.math-display .katex-display { margin: 0; }
+</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+<div id="file-warning" style="display:none;"></div>
+
+<div id="app">
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div id="sidebar-header">
+      <h1>📖 PaperReader</h1>
+      <div class="subtitle">RiceClaw 论文阅读器</div>
+      <div id="stats-bar">
+        <span class="stat">已读 <span class="stat-num" id="stat-read">0</span></span>
+        <span class="stat">/ 总计 <span class="stat-num" id="stat-total">0</span></span>
+        <span class="stat" id="stat-progress" style="margin-left:auto;"></span>
+      </div>
+    </div>
+    <input type="text" id="search-box" placeholder="搜索论文标题、作者..." autocomplete="off">
+    <div id="year-filter"></div>
+    <div id="paper-list"></div>
+  </aside>
+
+  <!-- Main -->
+  <main id="main">
+    <div id="welcome">
+      <h2>选择一篇论文开始阅读</h2>
+      <p>左侧列表展示了 docs/paper/ 下所有已处理的论文笔记，支持中英对照阅读和图片渲染。</p>
+      <div class="keys">
+        <kbd>Ctrl+F</kbd> 搜索 &nbsp;·&nbsp; 点击列表切换论文
+      </div>
+    </div>
+
+    <div id="toolbar" style="display:none;">
+      <div class="mode-group">
+        <button class="mode-btn" data-mode="original">原文</button>
+        <button class="mode-btn active" data-mode="dual">对照</button>
+        <button class="mode-btn" data-mode="chinese">中文</button>
+      </div>
+      <div class="paper-nav-title" id="paper-nav-title"></div>
+    </div>
+
+    <div id="reader" class="loading" style="display:none;"></div>
+  </main>
+</div>
+
+<div id="sidebar-grip"><div class="grip-inner"></div></div>
+
+<div id="error-toast"></div>
+
+<!-- Lightbox for image zoom -->
+<div id="lightbox">
+  <span id="lightbox-close">&times;</span>
+  <img id="lightbox-img" src="" alt="">
+</div>
+
+<!-- Notes Feature -->
+<div id="sel-toolbar"><button id="sel-mark-btn">📝 笔记</button></div>
+
+<div id="notes-tab"><span class="badge">0</span>笔记</div>
+
+<div id="notes-panel">
+  <div class="np-header">
+    <h3>笔记 <span class="np-count">(0)</span></h3>
+    <button class="np-close" id="np-close-btn">✕</button>
+  </div>
+  <div class="np-new" id="np-new-area" style="display:none">
+    <div class="np-source-preview" id="np-source-preview"></div>
+    <textarea id="np-textarea" placeholder="输入笔记内容…"></textarea>
+    <div class="np-actions">
+      <button id="np-cancel-btn">取消</button>
+      <button class="np-save" id="np-save-btn">保存</button>
+    </div>
+  </div>
+  <div class="np-list" id="np-list"></div>
+  <div class="np-footer">
+    <button id="np-export-btn">📥 导出 notes.json</button>
+  </div>
+</div>
+
+<div id="note-toast"></div>
+
+<!-- papers-data.js 由 build-reader.js 生成，缺失时自动回退到 fetch -->
+<script src="papers-data.js"></script>
+
+<script>
+// ============================================================
+// PaperReader — Main Application
+// ============================================================
+(function() {
+  'use strict';
+
+  // --- State ---
+  const state = {
+    papers: [],
+    currentId: null,
+    mode: 'dual',
+    filterText: '',
+    filterYear: '',
+    userNotes: {},
+    notesPanelOpen: false,
+    noteDraft: null,
+    selToolbarVisible: false,
+    _lastSel: null,
+    _embeddedPapers: null   // filled by papers-data.js when present
+  };
+
+  // --- DOM refs ---
+  const $ = id => document.getElementById(id);
+  const paperList = $('paper-list');
+  const searchBox = $('search-box');
+  const reader = $('reader');
+  const toolbar = $('toolbar');
+  const welcome = $('welcome');
+  const paperNavTitle = $('paper-nav-title');
+  const statRead = $('stat-read');
+  const statTotal = $('stat-total');
+  const statProgress = $('stat-progress');
+  const errorToast = $('error-toast');
+
+  // --- Utilities ---
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function showError(msg, duration) {
+    errorToast.textContent = msg;
+    errorToast.classList.add('show');
+    if (duration !== 0) {
+      setTimeout(() => errorToast.classList.remove('show'), duration || 4000);
+    }
+  }
+
+  function hideError() { errorToast.classList.remove('show'); }
+
+  // --- Auto-collapsing sidebar ---
+  var sidebarCollapseTimer = null;
+  var sidebar = document.getElementById('sidebar');
+  var sidebarGrip = document.getElementById('sidebar-grip');
+
+  function collapseSidebar() {
+    if (!sidebar) return;
+    sidebar.classList.add('collapsed');
+    if (sidebarGrip) sidebarGrip.classList.add('visible');
+  }
+
+  function expandSidebar() {
+    if (!sidebar) return;
+    sidebar.classList.remove('collapsed');
+    clearTimeout(sidebarCollapseTimer);
+    if (sidebarGrip) sidebarGrip.classList.remove('visible');
+  }
+
+  function scheduleCollapseSidebar() {
+    clearTimeout(sidebarCollapseTimer);
+    sidebarCollapseTimer = setTimeout(function() {
+      if (state.currentId) collapseSidebar();
+    }, 500);
+  }
+
+  // Hover expand/collapse (only when a paper is loaded)
+  sidebar.addEventListener('mouseenter', function() {
+    expandSidebar();
+  });
+  sidebar.addEventListener('mouseleave', function() {
+    if (state.currentId) scheduleCollapseSidebar();
+  });
+  // Grip hover to expand
+  if (sidebarGrip) {
+    sidebarGrip.addEventListener('mouseenter', function() {
+      expandSidebar();
+    });
+  }
+
+  // --- Data Loading: embedded <script> or fetch ---
+  function loadData() {
+    // Priority: embedded data (from <script> or inline build)
+    if (typeof __EMBEDDED_INDEX__ !== 'undefined' && __EMBEDDED_INDEX__) {
+      state.papers = __EMBEDDED_INDEX__.papers || [];
+      state._embeddedPapers = __EMBEDDED_PAPERS__ || {};
+      onDataLoaded();
+      return;
+    }
+    // Fallback: fetch (HTTP server mode)
+    loadIndexViaFetch();
+  }
+
+  async function loadIndexViaFetch() {
+    try {
+      const res = await fetch('papers-index.json');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      state.papers = data.papers || [];
+      // Also try to pre-fetch paper content hints
+      onDataLoaded();
+    } catch (err) {
+      console.error('Failed to load index:', err);
+      paperList.innerHTML = '<div style="padding:40px;color:#991b1b;font-size:14px;text-align:center;">加载失败。<br>请确保通过 HTTP 服务器运行，或先运行 <code style="display:inline-block;margin-top:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;font-size:12px;">node build-reader.js</code> 构建自包含版本。</div>';
+    }
+  }
+
+  function onDataLoaded() {
+    statRead.textContent = state.papers.length;
+    statTotal.textContent = state.papers.length;
+    statProgress.textContent = '📄 共 ' + state.papers.length + ' 篇';
+    renderYearFilter();
+    renderList();
+    if (state.currentId) { loadNotesForPaper(state.currentId); renderHighlights(state.currentId); renderNotesPanel(); updateNotesTabBadge(); }
+    // Restore last reading session (paper + scroll position)
+    restoreLastSession();
+  }
+
+  // --- Year Filter ---
+  function renderYearFilter() {
+    const years = [...new Set(state.papers.map(p => p.year).filter(Boolean))].sort((a,b) => b.localeCompare(a));
+    let html = `<button class="yf-pill ${!state.filterYear ? 'active' : ''}" data-year="">全部</button>`;
+    for (const y of years) {
+      html += `<button class="yf-pill ${state.filterYear === y ? 'active' : ''}" data-year="${escapeHtml(y)}">${escapeHtml(y)}</button>`;
+    }
+    document.getElementById('year-filter').innerHTML = html;
+  }
+
+  // --- List Rendering ---
+  function renderList() {
+    const q = state.filterText.toLowerCase();
+    const filtered = state.papers.filter(p => {
+      if (state.filterYear && p.year !== state.filterYear) return false;
+      if (!q) return true;
+      return p.title_cn.toLowerCase().includes(q)
+          || p.title_en.toLowerCase().includes(q)
+          || p.authors.toLowerCase().includes(q)
+          || (p.year || '').includes(q);
+    });
+
+    if (filtered.length === 0) {
+      paperList.innerHTML = '<div style="padding:20px;color:var(--text-secondary);font-size:13px;text-align:center;">无匹配论文</div>';
+      return;
+    }
+
+    let html = '';
+    for (const p of filtered) {
+      const isActive = p.id === state.currentId;
+      const statusIcon = '📖';
+      const authorsShort = p.authors ? p.authors.replace(/et\s*al\.?.*$/, 'et al.').substring(0, 40) + (p.authors.length > 40 ? '…' : '') : '';
+
+      html += `<div class="paper-item ${isActive ? 'active' : ''}" data-id="${escapeHtml(p.id)}">
+        <div class="pi-title">
+          <span class="pi-status">${statusIcon}</span>
+          <span>${escapeHtml(p.title_cn)}</span>
+        </div>
+        <div class="pi-meta">
+          ${p.year ? `<span class="pi-year">${escapeHtml(p.year)}</span>` : ''}
+          ${authorsShort ? `<span class="pi-source">${escapeHtml(authorsShort)}</span>` : ''}
+          ${p.assetCount > 0 ? `<span class="pi-badge">🖼 ${p.assetCount}</span>` : ''}
+        </div>
+      </div>`;
+    }
+    paperList.innerHTML = html;
+
+    // Click handlers
+    paperList.querySelectorAll('.paper-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.dataset.id;
+        if (id !== state.currentId) {
+          loadPaper(id);
+        }
+      });
+    });
+  }
+
+  // --- Paper Loading: embedded <script> or fetch ---
+  async function loadPaper(id) {
+    const paper = state.papers.find(p => p.id === id);
+    if (!paper) return;
+
+    clearSelOverlay();
+    state._lastSel = null;
+    state.currentId = id;
+    renderList();
+    collapseSidebar();
+
+    welcome.style.display = 'none';
+    toolbar.style.display = 'flex';
+    reader.style.display = 'block';
+    reader.className = 'loading';
+    reader.innerHTML = '<div style="padding:40px;color:var(--text-secondary);">加载中<span class="loading-dots"></span></div>';
+
+    let text = null;
+
+    // Try embedded data first
+    if (state._embeddedPapers && state._embeddedPapers[id]) {
+      text = state._embeddedPapers[id];
+    } else {
+      // Fallback: fetch
+      try {
+        const res = await fetch(id + '/paper.md');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        text = await res.text();
+      } catch (err) {
+        console.error('Failed to load paper:', err);
+        reader.className = '';
+        reader.innerHTML = `<div style="padding:40px;color:#991b1b;font-size:13px;">加载失败：${escapeHtml(err.message)}</div>`;
+        return;
+      }
+    }
+
+    const blocks = parsePaper(text, id);
+    renderBlocks(blocks, id);
+    renderMath();
+    paperNavTitle.textContent = paper.title_cn;
+    loadNotesForPaper(id);
+    renderHighlights(id);
+    renderNotesPanel();
+    updateNotesTabBadge();
+  }
+
+  // --- Parser ---
+  function parsePaper(text, paperId) {
+    const blocks = [];
+    const lines = text.split('\n');
+    const totalLines = lines.length;
+
+    // Skip YAML frontmatter
+    let startIdx = 0;
+    if (lines[0] && lines[0].trim() === '---') {
+      for (let i = 1; i < Math.min(50, totalLines); i++) {
+        if (lines[i] && lines[i].trim() === '---') {
+          startIdx = i + 1;
+          break;
+        }
+      }
+    }
+
+    // Helper to check if a line is a block separator
+    function isSep(line) { return line && line.trim() === '---'; }
+
+    // Helper to check if we're at a source anchor
+    function isAnchor(line) {
+      return line && line.trim().startsWith('<a id="') && line.trim().endsWith('"></a>');
+    }
+
+    // Helper to check for **Source:** line
+    function isSourceLine(line) {
+      return line && line.trim().startsWith('**Source:**');
+    }
+
+    // State machine: parse line by line
+    let i = startIdx;
+    while (i < totalLines) {
+      const line = lines[i];
+
+      // Skip empty lines at start
+      if (!line.trim()) { i++; continue; }
+
+      const trimmed = line.trim();
+
+      // Separator
+      if (trimmed === '---') {
+        blocks.push({ type: 'separator' });
+        i++;
+        continue;
+      }
+
+      // Anchor + Source pair
+      if (isAnchor(line)) {
+        const anchor = trimmed;
+        i++;
+        // Next line should be **Source:**
+        let sourceLine = '';
+        if (i < totalLines && isSourceLine(lines[i])) {
+          sourceLine = lines[i].trim();
+          i++;
+        }
+        blocks.push({ type: 'anchor', anchor, source: sourceLine });
+        continue;
+      }
+
+      // Source line without anchor
+      if (isSourceLine(line)) {
+        blocks.push({ type: 'anchor', anchor: '', source: trimmed });
+        i++;
+        continue;
+      }
+
+      // Section headings
+      const h1Match = trimmed.match(/^#\s+(.+)/);
+      const h2Match = trimmed.match(/^##\s+(.+)/);
+      const h3Match = trimmed.match(/^###\s+(.+)/);
+      const h4Match = trimmed.match(/^####\s+(.+)/);
+
+      if (h2Match) {
+        const title = h2Match[1].trim();
+        if (title.includes('阅读提示') || title.includes('Reading Notes')) {
+          // Read all lines until next section or end
+          i++;
+          const noteLines = [];
+          while (i < totalLines) {
+            if (lines[i].trim().startsWith('## ') || lines[i].trim() === '---') break;
+            noteLines.push(lines[i]);
+            i++;
+          }
+          blocks.push({ type: 'reading-notes', content: noteLines.join('\n').trim() });
+          continue;
+        }
+        if (title.includes('AI 摘要') || title.includes('AI Abstract')) {
+          i++;
+          const absLines = [];
+          while (i < totalLines) {
+            if (lines[i].trim().startsWith('## ') || lines[i].trim() === '---') break;
+            absLines.push(lines[i]);
+            i++;
+          }
+          blocks.push({ type: 'abstract', content: absLines.join('\n').trim() });
+          continue;
+        }
+        if (title.includes('术语对照表') || title.includes('术语表') || title.includes('Glossary') || title.includes('Terminology')) {
+          i++;
+          const glLines = [];
+          while (i < totalLines) {
+            if (lines[i].trim().startsWith('## ') || lines[i].trim() === '---') break;
+            glLines.push(lines[i]);
+            i++;
+          }
+          blocks.push({ type: 'glossary', content: glLines.join('\n').trim() });
+          continue;
+        }
+        blocks.push({ type: 'section', level: 2, title });
+        i++;
+        continue;
+      }
+
+      if (h3Match) {
+        blocks.push({ type: 'section', level: 3, title: h3Match[1].trim() });
+        i++;
+        continue;
+      }
+
+      if (h4Match) {
+        blocks.push({ type: 'section', level: 4, title: h4Match[1].trim() });
+        i++;
+        continue;
+      }
+
+      // H1 title (paper title)
+      if (h1Match) {
+        const title = h1Match[1].trim();
+        // Skip if it's the main title (already shown in metadata)
+        blocks.push({ type: 'section', level: 1, title });
+        i++;
+        continue;
+      }
+
+      // Image block: detect ![...](...)
+      const imgMatch = trimmed.match(/^!\[(.*)\]\(([^)]+)\)$/);
+      if (imgMatch) {
+        const alt = imgMatch[1];
+        const imgPath = imgMatch[2];
+        i++;
+        // Read caption lines
+        let captionEn = '', captionZh = '';
+        while (i < totalLines) {
+          const cl = lines[i].trim();
+          if (!cl || cl === '---' || cl.startsWith('**Source:**') || cl.startsWith('**Placed') || cl.startsWith('#')) {
+            if (!cl || cl === '---') break;
+            if (cl.startsWith('**Source:**') || cl.startsWith('**Placed')) { i++; continue; }
+            break;
+          }
+          if (cl.startsWith('**Original caption:**')) {
+            i++;
+            while (i < totalLines && lines[i].trim() && !lines[i].trim().startsWith('**') && !lines[i].trim().startsWith('#')) {
+              captionEn += (captionEn ? ' ' : '') + lines[i].trim();
+              i++;
+            }
+            continue;
+          }
+          if (cl.startsWith('**中文图注:**') || cl.startsWith('**中文图注：**')) {
+            i++;
+            while (i < totalLines && lines[i].trim() && !lines[i].trim().startsWith('**') && !lines[i].trim().startsWith('#')) {
+              captionZh += (captionZh ? ' ' : '') + lines[i].trim();
+              i++;
+            }
+            continue;
+          }
+          i++;
+        }
+        blocks.push({
+          type: 'image',
+          alt,
+          path: paperId + '/' + (imgPath.startsWith('assets/') ? imgPath : 'assets/' + imgPath.replace(/^\.\//, '')),
+          captionEn: captionEn.trim(),
+          captionZh: captionZh.trim()
+        });
+        continue;
+      }
+
+      // Bilingual block: detect **Original:** line
+      if (trimmed.startsWith('**Original:**')) {
+        // Extract inline content after **Original:** on the same line
+        let originalLines = [];
+        const inlineOrig = trimmed.replace(/^\*\*Original:\*\*\s*/, '');
+        if (inlineOrig) originalLines.push(inlineOrig);
+        i++;
+        // Collect subsequent original text lines
+        while (i < totalLines) {
+          const cl = lines[i].trim();
+          if (cl.startsWith('**中文：**') || cl.startsWith('**中文:**') || cl.startsWith('**Source:**') || cl.startsWith('**Placed') || cl.startsWith('**Original caption:**') || cl.startsWith('**中文图注：') || cl.startsWith('**中文图注:**') || isSep(cl) || isAnchor(lines[i]) || cl.startsWith('## ') || cl.startsWith('### ') || cl.startsWith('#### ') || cl.startsWith('![')) break;
+          originalLines.push(lines[i]);
+          i++;
+        }
+
+        // Check for **中文:**
+        let chineseLines = [];
+        if (i < totalLines && (lines[i].trim().startsWith('**中文:**') || lines[i].trim().startsWith('**中文：**'))) {
+          // Extract inline content after **中文:** on the same line
+          const inlineCh = lines[i].trim().replace(/^\*\*中文[：:]\*\*\s*/, '');
+          if (inlineCh) chineseLines.push(inlineCh);
+          i++;
+          while (i < totalLines) {
+            const cl = lines[i].trim();
+            if (cl.startsWith('**Source:**') || cl.startsWith('**Placed') || cl.startsWith('**Original caption:**') || cl.startsWith('**中文图注：') || cl.startsWith('**中文图注:**') || isSep(cl) || isAnchor(lines[i]) || cl.startsWith('## ') || cl.startsWith('### ') || cl.startsWith('#### ') || cl.startsWith('![')) break;
+            chineseLines.push(lines[i]);
+            i++;
+          }
+        }
+
+        const original = originalLines.join('\n').trim();
+        const chinese = chineseLines.join('\n').trim();
+        if (original || chinese) {
+          blocks.push({ type: 'bilingual', original, chinese });
+        }
+        continue;
+      }
+
+      // Fenced code block
+      if (trimmed.startsWith('```')) {
+        const lang = trimmed.slice(3).trim();
+        i++;
+        const codeLines = [];
+        while (i < totalLines) {
+          if (lines[i].trim() === '```') { i++; break; }
+          codeLines.push(lines[i]);
+          i++;
+        }
+        blocks.push({ type: 'code', content: codeLines.join('\n'), lang });
+        continue;
+      }
+
+      // Markdown table detection
+      if (trimmed.includes('|') && trimmed.startsWith('|')) {
+        const tableLines = [];
+        while (i < totalLines) {
+          const cl = lines[i].trim();
+          if (!cl.includes('|') || isSep(cl) || cl.startsWith('#')) break;
+          tableLines.push(cl);
+          i++;
+        }
+        if (tableLines.length >= 2) {
+          blocks.push({ type: 'table', markdown: tableLines.join('\n') });
+        }
+        continue;
+      }
+
+      // Image sub-heading (### Fig. X. ...)
+      if (trimmed.startsWith('###') && trimmed.includes('Fig.')) {
+        i++;
+        continue;
+      }
+      if (trimmed.startsWith('**Placed')) { i++; continue; }
+
+      // Blockquote
+      if (trimmed.startsWith('>')) {
+        i++;
+        const quoteLines = [];
+        while (i < totalLines) {
+          const cl = lines[i];
+          const ctrim = cl.trim();
+          if (!ctrim.startsWith('>') || isSep(cl) || ctrim.startsWith('## ') || ctrim.startsWith('### ')) break;
+          quoteLines.push(ctrim.replace(/^>\s?/, ''));
+          i++;
+        }
+        if (quoteLines.length > 0) {
+          blocks.push({ type: 'blockquote', content: quoteLines.join('\n') });
+        }
+        continue;
+      }
+
+      // Unordered list (- or * items)
+      if (trimmed.match(/^[-*]\s/)) {
+        const listChar = trimmed[0];
+        const items = [];
+        while (i < totalLines) {
+          const cl = lines[i];
+          const ctrim = cl.trim();
+          if (!ctrim.startsWith(listChar + ' ')
+            || isSep(cl) || ctrim.startsWith('## ') || ctrim.startsWith('### ')) break;
+          items.push(ctrim.replace(/^[-*]\s+/, ''));
+          i++;
+        }
+        if (items.length > 0) {
+          blocks.push({ type: 'list', ordered: false, items });
+        }
+        continue;
+      }
+
+      // Ordered list (1. 2. items)
+      if (trimmed.match(/^\d+\.\s/)) {
+        const items = [];
+        while (i < totalLines) {
+          const cl = lines[i];
+          const ctrim = cl.trim();
+          if (!ctrim.match(/^\d+\.\s+/)
+            || isSep(cl) || ctrim.startsWith('## ') || ctrim.startsWith('### ')) break;
+          items.push(ctrim.replace(/^\d+\.\s+/, ''));
+          i++;
+        }
+        if (items.length > 0) {
+          blocks.push({ type: 'list', ordered: true, items });
+        }
+        continue;
+      }
+
+      // Plain text paragraph
+      const paraLines = [];
+      while (i < totalLines) {
+        const cl = lines[i].trim();
+        if (!cl || isSep(cl) || cl.startsWith('## ') || cl.startsWith('### ') || cl.startsWith('![') || cl.startsWith('<a ')) break;
+        if (cl.startsWith('**Original:**') || cl.startsWith('**中文:**') || cl.startsWith('**中文：**') || cl.startsWith('**Source:**')) break;
+        paraLines.push(lines[i]);
+        i++;
+      }
+      if (paraLines.length > 0) {
+        const text = paraLines.join('\n').trim();
+        if (text) {
+          blocks.push({ type: 'plain', text });
+        }
+        continue;
+      }
+
+      i++;
+    }
+
+    return blocks;
+  }
+
+  // --- Render blocks ---
+  function renderBlocks(blocks, paperId) {
+    const mode = state.mode;
+    reader.className = '';
+    reader.innerHTML = '';
+
+    // Check if there's metadata to display
+    const paper = state.papers.find(p => p.id === paperId);
+    if (paper) {
+      const metaHtml = `
+        <div class="reader-metadata">
+          <h2>${escapeHtml(paper.title_en || paper.title_cn)}</h2>
+          ${paper.authors ? `<div class="rm-authors">${escapeHtml(paper.authors)}</div>` : ''}
+          ${paper.source ? `<div class="rm-source">${escapeHtml(paper.source)}</div>` : ''}
+        </div>`;
+      reader.insertAdjacentHTML('beforeend', metaHtml);
+    }
+
+    // Filter and render abstract (collapsible, default open)
+    var absBlock = null, glBlock = null;
+    for (var bi = 0; bi < blocks.length; bi++) {
+      var b = blocks[bi];
+      if (b.type === 'abstract' && !absBlock) absBlock = b;
+      if (b.type === 'glossary' && !glBlock) glBlock = b;
+    }
+    if (absBlock && absBlock.content) {
+      reader.insertAdjacentHTML('beforeend',
+        '<details class="reader-prelude" open>' +
+        '<summary>🤖 AI 摘要</summary>' +
+        '<div class="prelude-body">' + markdownToHtml(absBlock.content) + '</div>' +
+        '</details>');
+    }
+    // Render glossary (collapsible, default closed)
+    if (glBlock && glBlock.content) {
+      var glHtml = glossaryToHtml(glBlock.content);
+      reader.insertAdjacentHTML('beforeend',
+        '<details class="reader-prelude">' +
+        '<summary>📖 术语表</summary>' +
+        '<div class="prelude-body">' + glHtml + '</div>' +
+        '</details>');
+    }
+
+    // Render remaining blocks preserving original indices for bilingual IDs
+    for (var i = 0; i < blocks.length; i++) {
+      var block = blocks[i];
+      if (block.type === 'abstract' || block.type === 'glossary') continue;
+      var el = renderBlock(block, mode);
+      if (el) {
+        if (block.type === 'bilingual') el.id = 'b-' + paperId + '-' + i;
+        reader.appendChild(el);
+      }
+    }
+  }
+
+  // Convert simple markdown inline syntax to HTML (for abstract/glossary)
+  function markdownToHtml(str) {
+    if (!str) return '';
+    // Bold
+    str = str.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Inline code
+    str = str.replace(/`(.+?)`/g, '<code>$1</code>');
+    // Italic
+    str = str.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    // Paragraphs: double newlines
+    var parts = str.split(/\n{2,}/);
+    return parts.map(function(p) {
+      p = p.trim();
+      if (!p) return '';
+      // Single line breaks within a paragraph
+      p = p.replace(/\n/g, '<br>');
+      return '<p>' + p + '</p>';
+    }).join('');
+  }
+
+  // Convert glossary table (markdown) to HTML
+  function glossaryToHtml(str) {
+    if (!str) return '';
+    var lines = str.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
+    if (lines.length < 2) return '<p>' + escapeHtml(str) + '</p>';
+    // Skip separator line (| --- | --- |)
+    var bodyLines = lines.filter(function(l, i) { return i !== 1 && l.startsWith('|') && l.endsWith('|'); });
+    if (bodyLines.length === 0) return '<p>' + escapeHtml(str) + '</p>';
+    var html = '<table><thead><tr>';
+    var headerCells = bodyLines[0].split('|').filter(Boolean).map(function(c) { return c.trim(); });
+    headerCells.forEach(function(c) { html += '<th>' + escapeHtml(c) + '</th>'; });
+    html += '</tr></thead><tbody>';
+    for (var ri = 1; ri < bodyLines.length; ri++) {
+      var cells = bodyLines[ri].split('|').filter(Boolean).map(function(c) { return c.trim(); });
+      html += '<tr>';
+      cells.forEach(function(c) { html += '<td>' + escapeHtml(c) + '</td>'; });
+      html += '</tr>';
+    }
+    html += '</tbody></table>';
+    return html;
+  }
+
+  function renderBlock(block, mode) {
+    const div = document.createElement('div');
+    div.className = 'block';
+
+    switch (block.type) {
+      case 'separator':
+        div.className = 'block separator';
+        return div;
+
+      case 'anchor':
+        div.className = 'block source-anchor';
+        if (block.source) {
+          const src = block.source.replace(/\*\*Source:\*\*\s*/, '').trim();
+          div.innerHTML = `<span class="sa-label">${escapeHtml(src)}</span>`;
+        }
+        return div;
+
+      case 'section':
+        div.className = `block section-heading`;
+        const tag = block.level === 1 ? 'h2' : block.level === 2 ? 'h3' : block.level === 3 ? 'h4' : 'h5';
+        // Check for "阅读提示" to add special styling
+        if (block.title.includes('阅读提示')) {
+          // This will be handled in the reading-notes block type
+        }
+        const h = document.createElement(tag);
+        h.textContent = block.title;
+        div.appendChild(h);
+        return div;
+
+      case 'bilingual': {
+        div.className = 'block bilingual';
+        const hasOrig = !!block.original;
+        const hasCh = !!block.chinese;
+
+        if (mode === 'dual' && hasOrig && hasCh) {
+          div.innerHTML = `<div class="bi-dual">
+            <div class="bi-col"><div class="bi-col-label">原文</div>${renderInlineContent(block.original)}</div>
+            <div class="bi-col"><div class="bi-col-label">中文</div>${renderInlineContent(block.chinese)}</div>
+          </div>`;
+        } else if (mode === 'original' && hasOrig) {
+          div.innerHTML = `<div class="bi-original-only">${renderInlineContent(block.original)}</div>`;
+        } else if (mode === 'chinese' && hasCh) {
+          div.innerHTML = `<div class="bi-chinese-only">${renderInlineContent(block.chinese)}</div>`;
+        } else if (mode === 'dual') {
+          // Fallback: show whichever exists
+          const content = hasOrig ? block.original : (hasCh ? block.chinese : '');
+          if (content) div.innerHTML = `<div class="bi-original-only">${renderInlineContent(content)}</div>`;
+        } else if (mode === 'original') {
+          if (hasOrig) div.innerHTML = `<div class="bi-original-only">${renderInlineContent(block.original)}</div>`;
+        } else if (mode === 'chinese') {
+          if (hasCh) div.innerHTML = `<div class="bi-chinese-only">${renderInlineContent(block.chinese)}</div>`;
+        }
+        return div;
+      }
+
+      case 'image': {
+        div.className = 'block image-block';
+        const imgSrc = block.path;
+        let captionHtml = '';
+        if (block.captionEn || block.captionZh) {
+          if (mode === 'original' && block.captionEn) {
+            captionHtml = `<div class="img-caption"><div class="cap-en">${escapeHtml(block.captionEn)}</div></div>`;
+          } else if (mode === 'chinese' && block.captionZh) {
+            captionHtml = `<div class="img-caption"><div class="cap-zh">${escapeHtml(block.captionZh)}</div></div>`;
+          } else if (mode === 'dual') {
+            let c = '';
+            if (block.captionEn) c += `<div class="cap-en">${escapeHtml(block.captionEn)}</div>`;
+            if (block.captionZh) c += `<div class="cap-zh">${escapeHtml(block.captionZh)}</div>`;
+            if (c) captionHtml = `<div class="img-caption">${c}</div>`;
+          } else {
+            // Single mode fallback
+            const cap = mode === 'original' ? block.captionEn : block.captionZh;
+            if (cap) captionHtml = `<div class="img-caption">${escapeHtml(cap)}</div>`;
+          }
+        }
+        div.innerHTML = `<img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(block.alt)}" loading="lazy" onerror="this.style.display='none'">${captionHtml}`;
+        return div;
+      }
+
+      case 'code': {
+        div.className = 'block code-block';
+        const langAttr = block.lang ? ` class="lang-${escapeHtml(block.lang)}"` : '';
+        div.innerHTML = `<pre><code${langAttr}>${escapeHtml(block.content)}</code></pre>`;
+        return div;
+      }
+
+      case 'blockquote': {
+        div.className = 'block quote-block';
+        div.innerHTML = `<blockquote>${renderInlineContent(block.content)}</blockquote>`;
+        return div;
+      }
+
+      case 'list': {
+        div.className = 'block list-block';
+        const tag = block.ordered ? 'ol' : 'ul';
+        let html = `<${tag}>`;
+        for (const item of block.items) {
+          html += `<li>${renderInlineContent(item)}</li>`;
+        }
+        html += `</${tag}>`;
+        div.innerHTML = html;
+        return div;
+      }
+
+      case 'table': {
+        div.className = 'block table-block';
+        const tableHtml = markdownTableToHtml(block.markdown);
+        div.innerHTML = tableHtml;
+        return div;
+      }
+
+      case 'plain': {
+        div.className = 'block plain';
+        div.innerHTML = renderInlineContent(block.text);
+        return div;
+      }
+
+      case 'reading-notes': {
+        div.className = 'block reading-notes';
+        div.innerHTML = renderInlineContent(block.content);
+        return div;
+      }
+
+      default:
+        return null;
+    }
+  }
+
+  // --- Inline content rendering (Markdown -> HTML for text) ---
+  function renderInlineContent(text) {
+    if (!text) return '';
+
+    // === Auto-detect LaTeX-like formulas WITHOUT $ delimiters ===
+    var mathExprs = [], processed = text;
+    // Three-pass detection: (1) complex formulas, (2) simple formulas, (3) inline wrapping
+    processed = processed.split('\n').map(function(line) {
+      if (!line.trim() || /\$\$/.test(line)) return line;
+      if (/^\s*(?:#|\*|-|\d+\.|>)/.test(line)) return line; // headings, lists, blockquotes
+
+      var trimmed = line.trim();
+      var cnCount = (trimmed.match(/[\u4e00-\u9fff]/g) || []).length;
+      var nonSpace = trimmed.replace(/\s+/g, '');
+      var hasBraceLatex = /_{[^}]+}|\^\{[^}]+}|∈|≠|δ/.test(trimmed);
+      var singleSubs = (trimmed.match(/[a-zA-Z]_[a-zA-Z]/g) || []).length;
+      var hasOperator = /[=<>~|]/.test(trimmed);
+
+      // --- PASS 1: Complex formulas with _{...}/^{...}/∈/≠/δ and high symbol density ---
+      if (cnCount <= 3 && hasBraceLatex && nonSpace.length > 5) {
+        var specialChars = (nonSpace.match(/[_{}()^|=,<>~∈≠δ·…\[\]\\]/g) || []).length;
+        var letters = (nonSpace.match(/[a-zA-Z]/g) || []).length;
+        if (specialChars > letters) {
+          // Complex formula → wrap in $$ with brace escaping for KaTeX
+          var protectMap = [];
+          var escaped = trimmed.replace(/([_^]\{)([^}]*)(\})/g, function(_, open, content, close) {
+            var idx = protectMap.length;
+            protectMap.push(open + content + close);
+            return '##LATEX' + idx + '##';
+          });
+          escaped = escaped.replace(/\{/g, '\\{').replace(/\}/g, '\\}');
+          escaped = escaped.replace(/\.\.\./g, '\\dots');
+          escaped = escaped.replace(/##LATEX(\d+)##/g, function(_, idx) {
+            return protectMap[parseInt(idx)];
+          });
+          return '$$' + escaped + '$$';
+        }
+      }
+
+      // --- PASS 2: Simple formulas (single-char subscripts + operators) ---
+      if (cnCount <= 3 && nonSpace.length < 80 && hasOperator) {
+        // 2a: Has _{...} but failed density check + has operators
+        if (hasBraceLatex) {
+          return '$$' + trimmed + '$$';
+        }
+        // 2b: Has 2+ single-char subscripts (A_d, I_i, etc.)
+        if (singleSubs >= 2) {
+          return '$$' + trimmed + '$$';
+        }
+      }
+
+      // --- PASS 3: Inline wrapping for remaining lines (Chinese + English prose) ---
+      if (/`/.test(line)) return line; // skip code blocks
+      var result = line;
+      // Protection: prevent _x from matching inside _{...} content
+      // Match compound and simple subscripts/superscripts by specificity
+      var protectedSub = [];
+      function protect(m) {
+        var idx = protectedSub.length;
+        protectedSub.push(m);
+        return '##SUB' + idx + '##';
+      }
+      // Note: [)a-zA-Z] avoids "Z-)" descending range in some regex engines
+      // (1) Compound: e_i^{(k)} → $e_i^{(k)}$
+      result = result.replace(/([)a-zA-Z])_([)a-zA-Z])\^\{([^}]+)\}/g, protect);
+      // (2) Compound: A_{d_i}^{(k)} → $A_{d_i}^{(k)}$
+      result = result.replace(/([)a-zA-Z])_\{([^}]+)\}\^\{([^}]+)\}/g, protect);
+      // (3) Simple _{...} → $_{...}$
+      result = result.replace(/([)a-zA-Z])_\{([^}]+)\}/g, protect);
+      // (4) ^{...} superscript alone (re-insert preceding char, consume closing })
+      result = result.replace(/([)a-zA-Z])(\^\{[^}]*\})/g, function(m, before, sup) {
+        return before + '$' + sup + '$';
+      });
+      // (5) _x single-char subscript (safe: _{...} content is ##SUB## placeholders)
+      result = result.replace(/([)a-zA-Z])_([)a-zA-Z])(?![)a-zA-Z])/g, function(m) {
+        return '$' + m + '$';
+      });
+      // Restore protected patterns wrapped in $
+      result = result.replace(/##SUB(\d+)##/g, function(_, idx) {
+        return '$' + protectedSub[parseInt(idx)] + '$';
+      });
+      return result;
+    }).join('\n');
+    processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, function(_, m) {
+      var i = mathExprs.length;
+      mathExprs.push(m.trim());
+      return '##MATHB' + i + '##';
+    });
+    processed = processed.replace(/\$(.+?)\$/g, function(_, m) {
+      var i = mathExprs.length;
+      mathExprs.push(m.trim());
+      return '##MATHI' + i + '##';
+    });
+
+    // Escape HTML, then apply simple markdown
+    let html = escapeHtml(processed);
+
+    // Bold
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Strikethrough
+    html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
+    // Italic
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    // Inline code
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // Links
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+    // Restore math placeholders as KaTeX render targets
+    html = html.replace(/##MATH([BI])(\d+)##/g, function(_, type, idx) {
+      var tex = mathExprs[parseInt(idx)];
+      var escaped = tex.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      var cls = type === 'B' ? 'math-render math-display' : 'math-render';
+      return '<span class="' + cls + '" data-tex="' + escaped + '"></span>';
+    });
+
+    // Paragraphs: split by double newlines
+    const paragraphs = html.split(/\n\n+/);
+    if (paragraphs.length > 1) {
+      return paragraphs.map(p => {
+        const trimmed = p.trim();
+        if (!trimmed) return '';
+        // Check if already wrapped
+        if (trimmed.startsWith('<') && trimmed.endsWith('>')) return trimmed;
+        // Handle single line breaks within paragraph
+        const withBreaks = trimmed.replace(/\n/g, '<br>');
+        return `<p>${withBreaks}</p>`;
+      }).join('');
+    }
+
+    // Single paragraph
+    const trimmed = html.trim();
+    if (!trimmed) return '';
+    if (trimmed.startsWith('<') && trimmed.endsWith('>')) return trimmed;
+    // Handle ordered/unordered lists
+    if (/^(<ol|<ul)/.test(trimmed)) return trimmed;
+    return `<p>${trimmed.replace(/\n/g, '<br>')}</p>`;
+  }
+
+  // --- KaTeX math rendering ---
+  function renderMath() {
+    if (typeof katex === 'undefined') { setTimeout(renderMath, 300); return; }
+    document.querySelectorAll('.math-render:not(.rendered)').forEach(function(el) {
+      try {
+        katex.render(el.dataset.tex, el, {
+          throwOnError: false,
+          displayMode: el.classList.contains('math-display')
+        });
+        el.classList.add('rendered');
+      } catch(e) {
+        el.textContent = el.dataset.tex;
+      }
+    });
+  }
+
+  // --- Markdown Table to HTML ---
+  function markdownTableToHtml(md) {
+    const lines = md.trim().split('\n').filter(l => l.trim());
+    if (lines.length < 2) return '<table><tr><td>' + escapeHtml(md) + '</td></tr></table>';
+
+    // Parse header
+    const headerCells = parseTableRow(lines[0]);
+    // Skip separator line (line 1)
+    const bodyLines = lines.slice(2);
+
+    let html = '<table><thead><tr>';
+    for (const cell of headerCells) {
+      html += '<th>' + escapeHtml(cell.trim()) + '</th>';
+    }
+    html += '</tr></thead><tbody>';
+
+    for (const line of bodyLines) {
+      const cells = parseTableRow(line);
+      if (cells.length === 0) continue;
+      html += '<tr>';
+      for (const cell of cells) {
+        html += '<td>' + escapeHtml(cell.trim()) + '</td>';
+      }
+      html += '</tr>';
+    }
+    html += '</tbody></table>';
+    return html;
+  }
+
+  function parseTableRow(line) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) {
+      return trimmed.split('|').map(c => c.trim()).filter(c => c);
+    }
+    return trimmed.split('|').slice(1, -1).map(c => c.trim());
+  }
+
+  // --- Mode switching ---
+  function setMode(mode) {
+    state.mode = mode;
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+    if (state.currentId) {
+      // Reload the current paper to render in new mode
+      const paper = state.papers.find(p => p.id === state.currentId);
+      if (paper) loadPaper(state.currentId);
+    }
+  }
+
+  // --- Year filter events ---
+  document.getElementById('year-filter').addEventListener('click', (e) => {
+    const pill = e.target.closest('.yf-pill');
+    if (!pill) return;
+    const year = pill.dataset.year;
+    if (year === state.filterYear) return;
+    state.filterYear = year;
+    renderYearFilter();
+    renderList();
+  });
+
+  // --- Search ---
+  let searchTimer = null;
+  searchBox.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      state.filterText = searchBox.value;
+      renderList();
+    }, 150);
+  });
+
+  // Keyboard shortcut: Ctrl+F / Cmd+F focus search
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+      e.preventDefault();
+      searchBox.focus();
+      searchBox.select();
+    }
+  });
+
+  // --- Mode button events ---
+  document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => setMode(btn.dataset.mode));
+  });
+
+  // --- Lightbox (image click-to-zoom) ---
+  const lightbox = document.getElementById('lightbox');
+  const lightboxImg = document.getElementById('lightbox-img');
+  const lightboxClose = document.getElementById('lightbox-close');
+
+  reader.addEventListener('click', (e) => {
+    const img = e.target.closest('.image-block img');
+    if (!img) return;
+    lightboxImg.src = img.currentSrc || img.src;
+    lightbox.classList.add('show');
+  });
+
+  lightbox.addEventListener('click', () => lightbox.classList.remove('show'));
+  lightboxClose.addEventListener('click', () => lightbox.classList.remove('show'));
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') lightbox.classList.remove('show');
+  });
+
+  // ==================== NOTES FEATURE ====================
+
+  // --- Notes data loading ---
+  function loadNotesForPaper(paperId) {
+    const paper = state.papers.find(p => p.id === paperId);
+    const embedded = (paper && paper.notes) || [];
+    let local = [];
+    try {
+      const raw = localStorage.getItem('paper_notes');
+      if (raw) {
+        const all = JSON.parse(raw);
+        local = all[paperId] || [];
+      }
+    } catch (e) { /* ignore */ }
+    const noteMap = new Map();
+    for (const n of embedded) noteMap.set(n.id, n);
+    for (const n of local) noteMap.set(n.id, n);
+    state.userNotes[paperId] = [...noteMap.values()];
+  }
+
+  function persistNotesToLocal() {
+    try {
+      localStorage.setItem('paper_notes', JSON.stringify(state.userNotes));
+    } catch (e) { console.warn('Failed to persist notes to localStorage:', e); }
+  }
+
+  // --- Selection toolbar ---
+  // Get text length or content from a column element, skipping .bi-col-label
+  function getTextLen(el) {
+    var w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode: function(n) { return n.parentElement.closest('.bi-col-label') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT; }
+    });
+    var len = 0, n;
+    while (n = w.nextNode()) len += n.textContent.length;
+    return len;
+  }
+  function getColText(el) {
+    var w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode: function(n) { return n.parentElement.closest('.bi-col-label') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT; }
+    });
+    var parts = [], n;
+    while (n = w.nextNode()) parts.push(n.textContent);
+    return parts.join('');
+  }
+  function calcOtherOffsets(srcCol, tgtCol, s, e) {
+    var srcLen = getTextLen(srcCol);
+    var tgtLen = getTextLen(tgtCol);
+    if (!srcLen || !tgtLen) return { s2: s, e2: e, txt: '' };
+    var s2 = Math.round(s / srcLen * tgtLen);
+    var e2 = Math.round(e / srcLen * tgtLen);
+    var txt = getColText(tgtCol).slice(s2, e2);
+    return { s2: s2, e2: e2, txt: txt };
+  }
+
+  // Derive a Range from a column element and character offsets (for overlay positioning)
+  function getRangeFromColOffset(colEl, soff, eoff) {
+    var walker = document.createTreeWalker(colEl, NodeFilter.SHOW_TEXT, {
+      acceptNode: function(n) { return n.parentElement.closest('.bi-col-label') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT; }
+    });
+    var node, accum = 0, startNode, startOff, endNode, endOff;
+    while (node = walker.nextNode()) {
+      var len = node.textContent.length;
+      var nodeStart = accum;
+      var nodeEnd = accum + len;
+      if (!startNode && soff >= nodeStart && soff <= nodeEnd) {
+        startNode = node;
+        startOff = soff - nodeStart;
+      }
+      if (!endNode && eoff >= nodeStart && eoff <= nodeEnd) {
+        endNode = node;
+        endOff = eoff - nodeStart;
+      }
+      if (startNode && endNode) break;
+      accum = nodeEnd;
+    }
+    if (!startNode || !endNode) return null;
+    var r = document.createRange();
+    r.setStart(startNode, Math.min(startOff, startNode.textContent.length));
+    r.setEnd(endNode, Math.min(endOff, endNode.textContent.length));
+    return r;
+  }
+
+  // Compute selection offsets: shared by selectionchange (preview) and mark button (save)
+  function computeSelOffsets(sel) {
+    if (!sel || sel.isCollapsed || !sel.toString().trim()) return null;
+    var block = (sel.anchorNode?.nodeType === 3 ? sel.anchorNode.parentElement : sel.anchorNode)?.closest('.bilingual');
+    if (!block) return null;
+    var colEl = (sel.anchorNode?.nodeType === 3 ? sel.anchorNode.parentElement : sel.anchorNode)?.closest('.bi-col, .bi-original-only, .bi-chinese-only');
+    if (!colEl) return null;
+
+    var isEN = false;
+    if (colEl.classList.contains('bi-original-only')) {
+      isEN = true;
+    } else if (colEl.classList.contains('bi-chinese-only')) {
+      isEN = false;
+    } else if (colEl.classList.contains('bi-col')) {
+      var dual = colEl.closest('.bi-dual');
+      if (dual) {
+        isEN = dual.querySelector('.bi-col:first-child') === colEl;
+      } else {
+        var label = colEl.querySelector('.bi-col-label');
+        isEN = !label || label.textContent.includes('原文');
+      }
+    } else {
+      return null;
+    }
+
+    var soff = 0, found = false;
+    var walker = document.createTreeWalker(colEl, NodeFilter.SHOW_TEXT, {
+      acceptNode: function(n) { return n.parentElement.closest('.bi-col-label') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT; }
+    });
+    var node;
+    while (node = walker.nextNode()) {
+      if (node === sel.anchorNode || node.contains(sel.anchorNode)) { found = true; break; }
+      soff += node.textContent.length;
+    }
+    if (!found) return null;
+    soff += (sel.anchorNode === node) ? sel.getRangeAt(0).startOffset : 0;
+    var text = sel.toString().trim();
+    var eoff = soff + text.length;
+
+    var origCol, cnCol;
+    if (isEN) {
+      origCol = colEl;
+      cnCol = block.querySelector('.bi-chinese-only, .bi-dual > .bi-col:last-child');
+    } else {
+      cnCol = colEl;
+      origCol = block.querySelector('.bi-original-only, .bi-dual > .bi-col:first-child');
+    }
+
+    var origSoff, origEoff, origText;
+    var cnSoff, cnEoff, cnText;
+
+    if (isEN) {
+      origSoff = soff; origEoff = eoff; origText = text;
+      if (cnCol && getTextLen(cnCol) > 0) {
+        var o = calcOtherOffsets(origCol, cnCol, soff, eoff);
+        cnSoff = o.s2; cnEoff = o.e2; cnText = o.txt;
+      } else {
+        cnSoff = 0; cnEoff = 0; cnText = '';
+      }
+    } else {
+      cnSoff = soff; cnEoff = eoff; cnText = text;
+      if (origCol && getTextLen(origCol) > 0) {
+        var o = calcOtherOffsets(cnCol, origCol, soff, eoff);
+        origSoff = o.s2; origEoff = o.e2; origText = o.txt;
+      } else {
+        origSoff = 0; origEoff = 0; origText = '';
+      }
+    }
+
+    return {
+      block: block,
+      origCol: origCol, cnCol: cnCol,
+      origSoff: origSoff, origEoff: origEoff, origText: origText,
+      cnSoff: cnSoff, cnEoff: cnEoff, cnText: cnText,
+    };
+  }
+
+  // --- Real-time selection highlight (overlay) ---
+  var selOverlayTimer = null;
+  function showSelOverlay(offsets) {
+    clearSelOverlay();
+    if (!offsets) return;
+    var reader = document.getElementById('reader');
+    var overlay = document.getElementById('sel-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'sel-overlay';
+      overlay.style.cssText = 'position:absolute;pointer-events:none;z-index:5;left:0;top:0;width:100%;height:0;overflow:visible;';
+      reader.style.position = 'relative';
+      reader.appendChild(overlay);
+    }
+    overlay.innerHTML = '';
+
+    function addOverlayRects(range) {
+      if (!range || range.collapsed) return;
+      var rects = range.getClientRects();
+      if (!rects) return;
+      var readerRect = reader.getBoundingClientRect();
+      for (var i = 0; i < rects.length; i++) {
+        var r = rects[i];
+        var d = document.createElement('div');
+        d.className = 'sel-hl-rect';
+        d.style.cssText = 'position:absolute;left:' + (r.left - readerRect.left) + 'px;top:' + (r.top - readerRect.top) + 'px;width:' + r.width + 'px;height:' + r.height + 'px;background:rgba(200,230,201,0.4);border-radius:2px;pointer-events:none;';
+        overlay.appendChild(d);
+      }
+    }
+
+    // Selected column: use native selection rects
+    var sel = window.getSelection();
+    if (sel && !sel.isCollapsed) {
+      addOverlayRects(sel.getRangeAt(0));
+    }
+    // Other column: build range from offsets
+    if (offsets.cnCol && offsets.cnEoff > offsets.cnSoff) {
+      var cnRange = getRangeFromColOffset(offsets.cnCol, offsets.cnSoff, offsets.cnEoff);
+      addOverlayRects(cnRange);
+    }
+    if (offsets.origCol && offsets.origEoff > offsets.origSoff) {
+      var origRange = getRangeFromColOffset(offsets.origCol, offsets.origSoff, offsets.origEoff);
+      addOverlayRects(origRange);
+    }
+  }
+
+  function clearSelOverlay() {
+    var overlay = document.getElementById('sel-overlay');
+    if (overlay) overlay.innerHTML = '';
+  }
+
+  // Reposition on scroll
+  function repositionSelOverlay() {
+    var sel = state._lastSel;
+    if (!sel || !state.selToolbarVisible) { clearSelOverlay(); return; }
+    showSelOverlay(sel);
+  }
+
+  // --- Selection toolbar ---
+  document.addEventListener('selectionchange', () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+      hideSelToolbar();
+      return;
+    }
+    const container = (sel.anchorNode?.nodeType === 3 ? sel.anchorNode.parentElement : sel.anchorNode)?.closest('#reader');
+    if (!container) { hideSelToolbar(); return; }
+    const block = (sel.anchorNode?.nodeType === 3 ? sel.anchorNode.parentElement : sel.anchorNode)?.closest('.bilingual');
+    if (!block) { hideSelToolbar(); return; }
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    showSelToolbar(rect);
+
+    // Compute offsets and store for Mark button
+    var offsets = computeSelOffsets(sel);
+    state._lastSel = offsets;
+
+    // Debounced real-time overlay preview (both columns)
+    clearTimeout(selOverlayTimer);
+    selOverlayTimer = setTimeout(function() {
+      showSelOverlay(state._lastSel);
+    }, 100);
+  });
+
+  function showSelToolbar(rect) {
+    const tb = document.getElementById('sel-toolbar');
+    tb.classList.add('visible');
+    const tbRect = tb.getBoundingClientRect();
+    let left = rect.left + rect.width / 2 - tbRect.width / 2;
+    let top = rect.top - 8;
+    if (left < 8) left = 8;
+    if (left + tbRect.width > window.innerWidth - 8) left = window.innerWidth - tbRect.width - 8;
+    if (top < 8) top = rect.bottom + 8;
+    tb.style.left = left + 'px';
+    tb.style.top = top + 'px';
+    state.selToolbarVisible = true;
+  }
+
+  function hideSelToolbar() {
+    const tb = document.getElementById('sel-toolbar');
+    tb.classList.remove('visible');
+    state.selToolbarVisible = false;
+    state._lastSel = null;
+    clearSelOverlay();
+  }
+
+  // Listen for scroll to reposition overlay
+  document.getElementById('reader').addEventListener('scroll', function() {
+    if (state.selToolbarVisible) repositionSelOverlay();
+  }, true);
+
+  // --- Mark button ---
+  document.getElementById('sel-mark-btn').addEventListener('click', () => {
+    var offsets = state._lastSel;
+    if (!offsets) return;
+    var block = offsets.block;
+    if (!block) return;
+
+    state.noteDraft = {
+      anchor: block.id,
+      sourceText: offsets.origText,
+      soff: offsets.origSoff,
+      eoff: offsets.origEoff,
+      sourceCN: offsets.cnText,
+      soffCN: offsets.cnSoff,
+      eoffCN: offsets.cnEoff,
+      targetPara: null,
+    };
+
+    clearSelOverlay();
+    state._lastSel = null;
+    hideSelToolbar();
+    openNotesPanel('compose');
+  });
+
+  // --- Highlight rendering ---
+  function renderHighlights(paperId) {
+    clearSelOverlay();
+    document.querySelectorAll('.note-hl').forEach(el => {
+      const parent = el.parentNode;
+      parent.replaceChild(document.createTextNode(el.textContent), el);
+      parent.normalize();
+    });
+    const notes = state.userNotes[paperId] || [];
+    const byAnchor = {};
+    for (const n of notes) {
+      if (!byAnchor[n.anchor]) byAnchor[n.anchor] = [];
+      byAnchor[n.anchor].push(n);
+    }
+    for (const [anchorId, anchorNotes] of Object.entries(byAnchor)) {
+      if (!anchorId) continue;
+      const block = document.getElementById(anchorId);
+      if (!block) continue;
+      for (const note of anchorNotes) {
+        // Highlight Original column
+        if (note.sourceText && note.soff !== undefined && note.eoff !== undefined && note.eoff > note.soff) {
+          var origCol = block.querySelector('.bi-original-only, .bi-dual > .bi-col:first-child');
+          if (origCol) insertMarkAtOffset(origCol, note.soff, note.eoff, note.id);
+        }
+        // Highlight Chinese column
+        if (note.sourceCN && note.soffCN !== undefined && note.eoffCN !== undefined && note.eoffCN > note.soffCN) {
+          var cnCol = block.querySelector('.bi-chinese-only, .bi-dual > .bi-col:last-child');
+          if (cnCol) insertMarkAtOffset(cnCol, note.soffCN, note.eoffCN, note.id);
+        }
+      }
+    }
+  }
+
+  function insertMarkAtOffset(para, soff, eoff, noteId) {
+    const walker = document.createTreeWalker(para, NodeFilter.SHOW_TEXT, {
+      acceptNode: function(n) {
+        return n.parentElement.closest('.bi-col-label') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    let node, accum = 0;
+    const ranges = [];
+    while (node = walker.nextNode()) {
+      const len = node.textContent.length;
+      const nodeStart = accum;
+      const nodeEnd = accum + len;
+      if (nodeEnd <= soff) { accum = nodeEnd; continue; }
+      if (nodeStart >= eoff) break;
+      const relStart = Math.max(0, soff - nodeStart);
+      const relEnd = Math.min(len, eoff - nodeStart);
+      ranges.push({ node, relStart, relEnd, nodeStart });
+      accum = nodeEnd;
+    }
+    // Apply splits in reverse to avoid offset invalidation
+    for (let i = ranges.length - 1; i >= 0; i--) {
+      const { node: n, relStart, relEnd } = ranges[i];
+      const after = n.textContent.slice(relEnd);
+      if (after) n.parentNode.insertBefore(document.createTextNode(after), n.nextSibling);
+      const mark = document.createElement('mark');
+      mark.className = 'note-hl';
+      mark.dataset.noteId = noteId;
+      mark.textContent = n.textContent.slice(relStart, relEnd);
+      n.parentNode.replaceChild(mark, n);
+      const before = n.textContent.slice(0, relStart);
+      if (before) mark.parentNode.insertBefore(document.createTextNode(before), mark);
+    }
+  }
+
+  // --- Panel ---
+  function openNotesPanel(mode) {
+    state.notesPanelOpen = true;
+    document.getElementById('notes-panel').classList.add('open');
+    document.getElementById('notes-tab').style.display = 'none';
+    renderNotesPanel(mode);
+  }
+
+  function closeNotesPanel() {
+    state.notesPanelOpen = false;
+    state.noteDraft = null;
+    document.getElementById('notes-panel').classList.remove('open');
+    document.getElementById('notes-tab').style.display = '';
+    document.getElementById('np-new-area').style.display = 'none';
+    updateNotesTabBadge();
+  }
+
+  function toggleNotesPanel() {
+    if (state.notesPanelOpen) { closeNotesPanel(); }
+    else { openNotesPanel('list'); }
+  }
+
+  document.getElementById('notes-tab').addEventListener('click', toggleNotesPanel);
+  document.getElementById('np-close-btn').addEventListener('click', closeNotesPanel);
+
+  function renderNotesPanel(mode) {
+    const list = document.getElementById('np-list');
+    const newArea = document.getElementById('np-new-area');
+    const notes = state.userNotes[state.currentId] || [];
+    document.querySelector('.np-count').textContent = '(' + notes.length + ')';
+
+    if (mode === 'compose' && state.noteDraft) {
+      newArea.style.display = 'block';
+            var preview = state.noteDraft.sourceText || state.noteDraft.sourceCN || '';
+      document.getElementById('np-source-preview').textContent = '\uD83D\uDCCE ' + (preview.length > 80 ? preview.slice(0, 80) + '\u2026' : preview);
+      document.getElementById('np-textarea').value = '';
+      document.getElementById('np-textarea').focus();
+    } else {
+      newArea.style.display = 'none';
+    }
+
+    if (notes.length === 0 && mode !== 'compose') {
+      list.innerHTML = '<div style="color:#aaa;font-size:13px;padding:20px 0;text-align:center">\u6682\u65E0\u7B14\u8BB0<br>\u9009\u4E2D\u6587\u672C\u540E\u70B9\u51FB\u300C\uD83D\uDCDD \u7B14\u8BB0\u300D\u6DFB\u52A0</div>';
+      return;
+    }
+
+    list.innerHTML = notes.map(function(n) {
+      var time = new Date(n.createdAt).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      var src = '';
+      if (n.sourceText) src += 'EN: ' + n.sourceText.slice(0, 30);
+      if (n.sourceCN) { if (src) src += ' | '; src += 'CN: ' + n.sourceCN.slice(0, 30); }
+      if (src.length > 60) src = src.slice(0, 60) + '…';
+      return '<div class="np-list-item" data-note-id="' + n.id + '">' +
+        (src ? '<div class="npl-source">' + escapeHtml(src.slice(0, 60)) + (src.length > 60 ? '\u2026' : '') + '</div>' : '') +
+        '<div class="npl-text">' + escapeHtml(n.note) + '</div>' +
+        '<div class="npl-time">' + time + '</div>' +
+        '<button class="npl-del" data-note-id="' + n.id + '">\u2715</button>' +
+        '</div>';
+    }).join('');
+  }
+
+  // --- Save note ---
+  document.getElementById('np-save-btn').addEventListener('click', saveNote);
+  document.getElementById('np-textarea').addEventListener('keydown', function(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      saveNote();
+    }
+  });
+
+  function saveNote() {
+    var draft = state.noteDraft;
+    if (!draft) return;
+    var text = document.getElementById('np-textarea').value.trim();
+    if (!text) return;
+    var note = {
+      id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2),
+      anchor: draft.anchor,
+      sourceText: draft.sourceText || '',
+      sourceCN: draft.sourceCN || '',
+      soff: draft.soff || 0,
+      eoff: draft.eoff || 0,
+      soffCN: draft.soffCN || 0,
+      eoffCN: draft.eoffCN || 0,
+      note: text,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    if (!state.userNotes[state.currentId]) state.userNotes[state.currentId] = [];
+    state.userNotes[state.currentId].push(note);
+    persistNotesToLocal();
+    renderHighlights(state.currentId);
+    state.noteDraft = null;
+    document.getElementById('np-new-area').style.display = 'none';
+    showNoteToast('\u5DF2\u4FDD\u5B58 \u2713');
+    setTimeout(function() { closeNotesPanel(); }, 800);
+    updateNotesTabBadge();
+  }
+
+  document.getElementById('np-cancel-btn').addEventListener('click', function() {
+    state.noteDraft = null;
+    renderHighlights(state.currentId);
+    closeNotesPanel();
+  });
+
+  // --- Delete note ---
+  document.getElementById('np-list').addEventListener('click', function(e) {
+    var delBtn = e.target.closest('.npl-del');
+    if (delBtn) {
+      e.stopPropagation();
+      deleteNote(delBtn.dataset.noteId);
+      return;
+    }
+    var item = e.target.closest('.np-list-item');
+    if (!item) return;
+    var noteId = item.dataset.noteId;
+    var mark = document.querySelector('.note-hl[data-note-id="' + noteId + '"]');
+    if (mark) {
+      mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      mark.classList.add('active-hl');
+      setTimeout(function() { mark.classList.remove('active-hl'); }, 1500);
+    }
+  });
+
+  function deleteNote(noteId) {
+    if (!state.currentId) return;
+    var notes = state.userNotes[state.currentId] || [];
+    notes = notes.filter(function(n) { return n.id !== noteId; });
+    state.userNotes[state.currentId] = notes;
+    persistNotesToLocal();
+    renderHighlights(state.currentId);
+    renderNotesPanel();
+    updateNotesTabBadge();
+    showNoteToast('\u5DF2\u5220\u9664');
+  }
+
+  // --- Click highlight -> open panel ---
+  document.addEventListener('click', function(e) {
+    var mark = e.target.closest('.note-hl');
+    if (!mark) return;
+    e.preventDefault();
+    var noteId = mark.dataset.noteId;
+    openNotesPanel('list');
+    var item = document.querySelector('.np-list-item[data-note-id="' + noteId + '"]');
+    if (item) {
+      item.classList.add('active-note');
+      item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(function() { item.classList.remove('active-note'); }, 2000);
+    }
+  });
+
+  // --- Click outside panel to close ---
+  document.addEventListener('mousedown', function(e) {
+    if (!state.notesPanelOpen) return;
+    var panel = document.getElementById('notes-panel');
+    var tab = document.getElementById('notes-tab');
+    if (!panel.contains(e.target) && !tab.contains(e.target) && !e.target.closest('#sel-toolbar')) {
+      closeNotesPanel();
+    }
+  });
+
+  // --- Toast ---
+  function showNoteToast(msg) {
+    var t = document.getElementById('note-toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(function() { t.classList.remove('show'); }, 2000);
+  }
+
+  // --- Tab badge ---
+  function updateNotesTabBadge() {
+    var notes = state.userNotes[state.currentId] || [];
+    var badge = document.querySelector('#notes-tab .badge');
+    if (badge) badge.textContent = notes.length;
+  }
+
+  // --- Export notes.json ---
+  document.getElementById('np-export-btn').addEventListener('click', function() {
+    var notes = state.userNotes[state.currentId] || [];
+    if (notes.length === 0) { showNoteToast('\u6682\u65E0\u7B14\u8BB0\u53EF\u5BFC\u51FA'); return; }
+    var data = JSON.stringify({ notes: notes }, null, 2);
+    var blob = new Blob([data], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'notes.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showNoteToast('\u5DF2\u5BFC\u51FA notes.json');
+  });
+
+  // ==================== END NOTES FEATURE ====================
+
+  // ==================== READING POSITION MEMORY ====================
+  // Simple: only remember the LAST read paper + its scroll position.
+  // On page refresh: restore that paper + scroll. On paper switch: start from top.
+  const READING_POS_KEY = 'paper_reading_positions';
+  let _posSaveTimer = null;
+
+  function saveReadingPosition(paperId) {
+    const el = document.getElementById('reader');
+    if (!el || !paperId) return;
+    try {
+      localStorage.setItem(READING_POS_KEY, JSON.stringify({
+        lastPaperId: paperId,
+        scrollTop: el.scrollTop,
+        updatedAt: Date.now()
+      }));
+    } catch (e) { /* ignore */ }
+  }
+
+  function restoreLastSession() {
+    var data;
+    try {
+      var raw = localStorage.getItem(READING_POS_KEY);
+      data = raw ? JSON.parse(raw) : null;
+    } catch (e) { data = null; }
+    if (!data || !data.lastPaperId) return;
+
+    // Restore the last opened paper
+    var paper = state.papers.find(function(p) { return p.id === data.lastPaperId; });
+    if (!paper) return;
+
+    loadPaper(data.lastPaperId);
+
+    // After content renders, restore scroll position
+    var scrollTarget = data.scrollTop;
+    if (scrollTarget && typeof scrollTarget === 'number') {
+      var checkInterval = setInterval(function() {
+        var el = document.getElementById('reader');
+        if (el && el.scrollHeight > 0) {
+          el.scrollTop = Math.min(scrollTarget, el.scrollHeight - el.clientHeight);
+          clearInterval(checkInterval);
+        }
+      }, 50);
+      // Safety: stop checking after 5 seconds
+      setTimeout(function() { clearInterval(checkInterval); }, 5000);
+    }
+  }
+
+  // Debounced scroll save (only for the current paper while reading)
+  document.getElementById('reader').addEventListener('scroll', function() {
+    if (!state.currentId) return;
+    clearTimeout(_posSaveTimer);
+    _posSaveTimer = setTimeout(function() {
+      saveReadingPosition(state.currentId);
+    }, 300);
+  });
+  // ==================== END READING POSITION MEMORY ====================
+
+  // --- Init ---
+  loadData();
+})();
+</script>
+</body>
+</html>
