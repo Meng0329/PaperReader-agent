@@ -167,10 +167,9 @@ The framework includes idea generation, experiment design, execution, and writin
 ## 阅读提示
 
 1. **核心贡献：** 一句话总结
-2. **与学位论文的关联：** 具体说明哪一章哪一节可引用
-3. **关键创新：** bullet list
-4. **局限性注意：** 论文的局限，避免误引用
-5. **数据来源：** 如果论文有公开数据集/代码，附链接
+2. **关键创新：** bullet list
+3. **局限性注意：** 论文的局限，避免误引用
+4. **数据来源：** 如果论文有公开数据集/代码，附链接
 ```
 
 ### 2.6 占位符格式（status: placeholder）
