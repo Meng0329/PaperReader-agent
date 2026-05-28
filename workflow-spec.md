@@ -1,4 +1,4 @@
-# OpenSpec 07：Paper Directory 统一规范
+# Paper Directory 统一规范
 
 > 定义从原始 PDF 到 paper-reader 可渲染格式的标准处理流程和文件规范。
 > 适用范围：`docs/paper/` 下所有论文目录。
