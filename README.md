@@ -1,5 +1,9 @@
 # PaperReader-agent
 
+<p align="center">
+  <a href="README.md">🇨🇳 中文</a> | <a href="README.en.md">🇬🇧 English</a>
+</p>
+
 **双语论文阅读工作流。** 将学术 PDF 转化为结构化的中英对照阅读笔记，通过浏览器实现高效阅读。
 
 ## 为什么要有这个工具？
