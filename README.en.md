@@ -35,7 +35,7 @@ git clone https://github.com/Yuan1z0825/nature-skills.git
 Run this in **Claude Code / Codex / any AI agent**:
 
 ```
-/nature-skills:nature-reader /path/to/paper.pdf /path/to/workflow-spec.md
+/nature-skills:nature-reader [path/to/paper.pdf] [path/to/workflow-spec.md]
 ```
 
 The AI will automatically:

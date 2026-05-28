@@ -35,7 +35,7 @@ git clone https://github.com/Yuan1z0825/nature-skills.git
 在 **Claude Code / Codex / 其他 AI 代理** 中执行一条命令：
 
 ```
-/nature-skills:nature-reader /path/to/paper.pdf /path/to/workflow-spec.md
+/nature-skills:nature-reader [论文 PDF 路径] [workflow-spec.md 路径]
 ```
 
 AI 会自动完成：
