@@ -21,9 +21,11 @@
 ├── source_map.json       # 元数据 + 锚点索引（推荐，有 PDF 时必需）
 ├── translation_notes.md  # 翻译说明/附录记录（可选，有 PDF 时推荐）
 ├── assets/               # 图片资源目录（有 PDF 时必需）
-│   ├── fig1.png          # 图表清晰截图
-│   ├── table1.png
-│   └── page_01.png       # 整页截图（备用）
+│   ├── fig_p2_0.jpeg     # PDF嵌入的独立图片（PyMuPDF提取）
+│   ├── fig_p8_0.png      #   命名: fig_p{page}_{idx}.ext
+│   ├── fig_03_p19.png    # MinerU渲染的图表（VLM生成）
+│   │                     #   命名: fig_{n:02d}_p{page}.png
+│   └── fig_p31_0.png     # 优先使用嵌入图片，其次MinerU渲染
 └── *.pdf                 # 原始 PDF（有则保留）
 ```
 
@@ -201,6 +203,16 @@ status: "placeholder"
 | **去重** | 同一图片在 paper.md 中只出现一次 | 仅保留 Section 2 内的 Fig.1 | Abstract 后与 Section 2 内各有一份 Fig.1 |
 | **位置深度** | 所有图片位置应在文档前 90% 内（≤90% 位置） | Fig.3 at 75% ✅ | Fig.3 at 96% ⚠️（接近文档末尾） |
 | **内容分离** | 图片块以 `---` 分隔，确保与前后锚点块之间有明确边界 | `...\n---\n### Fig. X\n![fig]\n---\n<a id="SXXX">` | 图片与锚点块之间无 `---` 分隔 |
+
+**图片来源优先级（从高到低）：**
+
+| 优先级 | 类型 | 命名格式 | 来源 | 适用场景 |
+|--------|------|----------|------|----------|
+| 🥇 | PDF嵌入的独立图片 | `fig_p{page}_{idx}.ext` | PyMuPDF (`fitz` 提取) | PDF中有嵌入式图片对象（通常为高分辨率） |
+| 🥈 | MinerU VLM渲染图 | `fig_{n:02d}_p{page}.png` | MinerU API `images` (base64) | 矢量图/图表，PDF中无嵌入对象 |
+| ❌ | 整页截图 | `page_*.png` **(不使用)** | MinerU/PyMuPDF | 包含界面元素，非论文插图 |
+
+**关键规则：** 只使用 `fig_` 开头的文件作为论文插图引用。`page_*` 文件是整页截图（包含页眉页脚等界面元素），**不得**作为论文插图使用。
 
 **处理流程（用于 nature-reader 或手工创建 paper.md）：**
 1. 确定图片在原文中首次引用的段落和页码
@@ -421,16 +433,48 @@ Step 4: 人工质检
   ├── 补充阅读笔记（## 阅读提示）
   └── 输出：paper.md（终稿）
 
+Step 2.5: 图片资产后处理（关键！MinerU 输出清理）
+  ├── 目标：只保留论文实际插图，删除无用图片
+  │
+  ├── 方法一：识别 MinerU content_list 中的图表
+  │   ├── 打开 mineru_raw.json 的 content_list 数组
+  │   ├── 查找 type:"image" 的条目
+  │   ├── 检查 img_path —— 以 "images/" 开头的是真实图表
+  │   │   （注意：不是所有 MinerU 图片都是插图，有些是装饰性元素）
+  │   └── 通过 page_idx 确定图表所在页码
+  │
+  ├── 方法二：利用 PyMuPDF 嵌入式图片（如有）
+  │   ├── 查看 assets/ 中是否有 fig_p{p}_{i}.ext 文件
+  │   ├── 这类图片通常分辨率更高，优先使用
+  │   └── 缺失时，用 MinerU VLM 渲染图替代
+  │
+  ├── 文件操作：
+  │   ├── 删除所有 page_*.png（整页截图，不是插图）
+  │   ├── 保留 fig_p*.ext（PDF嵌入式图片）
+  │   ├── 将 MinerU 哈希命名图表重命名为 fig_{n:02d}_p{page}.png
+  │   │   （n 为图号，page 为页码）
+  │   └── 可选：删除其他非 fig_ 开头的多余图片
+  │
+  ├── 关键原则：
+  │   ├── paper.md 中只引用 fig_ 开头的文件
+  │   ├── 优先使用 fig_p*（嵌入图片，高分辨率）
+  │   └── 其次使用 fig_{n:02d}_p*（MinerU 渲染）
+  │
+  └── 参考：assets/ 最终应只留下 ~8 张 fig_ 图片 + 其他明确需要的文件
+
 Step 5: source_map.json 精修
-  ├── 补全 figures/tables 的 asset 路径
+  ├── 补全 figures 段：
+  │   ├── 使用论文实际图号（F001～F008），而非 MinerU 自动编号（F01～F0N）
+  │   ├── asset 路径指向 assets/fig_*.*（而非哈希文件名）
+  │   └── description 包含中文描述
   ├── 补全 page_index
-  ├── 补全 metadata
+  ├── 补全 metadata（title, authors, source, paper_type 等）
   ├── 逐项核对 paper.md 中所有 `![...](...)` 图片均在 source_map 中有对应条目
   ├── 运行 §3.8 的验证脚本确保双向映射一致
   └── 输出：source_map.json（终版）
 
-Step 6: 索引重建
-  └── node build-reader.js（更新 papers-index.json + papers-data.js）
+Step 6: 索引重建（⚠️ 必须执行，否则 paper-reader 不更新）
+  └── node build-reader.js（扫描所有论文目录，更新 papers-index.json + papers-data.js）
 ```
 
 ### 4.2 最小可行版本（快速处理）
@@ -461,24 +505,39 @@ python3 mineru_parse.py path/to/paper.pdf docs/paper/论文目录
 
 ```
 论文目录/
-├── paper.md              # 中英对照阅读笔记（需人工/LLM 翻译后填充）
-├── source_map.json       # 自动生成的结构化索引
+├── source_map.json       # 自动生成的结构化索引（需精修 figures 段）
 ├── mineru_raw.md         # MinerU API 返回的 Markdown 原文
-├── mineru_raw.json       # MinerU API 返回的结构化 JSON
+├── mineru_raw.json       # MinerU API 返回的结构化 JSON（含 content_list）
 ├── assets/
-│   ├── page_01.png       # 全页渲染图（MinerU API）
-│   ├── fig_01_p34.png    # 独立图片（PyMuPDF），按检测顺序命名
-│   ├── fig_02_p34.png    #   fig_NN_p{page}.png 格式
-│   └── ...               #   paper.md 中直接引用此命名
-└── *.pdf                 # 原始 PDF
+│   ├── <hash>.jpg        # MinerU API 返回的图片（哈希命名）
+│   ├── <hash>.jpg        #   包含：页面渲染、图表渲染、公式等
+│   └── ...               #   ⚠️ 需要后处理：筛选、重命名
+└── *.pdf                 # 原始 PDF（副本）
 ```
 
-脚本双通道说明：
+⚠️ **重要：后处理（必须执行）**
 
-| 通道 | 工具 | 产出 | 作用 |
-|------|------|------|------|
-| A | MinerU API `/v1/file_parse` | `mineru_raw.md/.json`, `content_list` | VLM+OCR 文本提取、结构分析、图片/表格识别 |
-| B | PyMuPDF (`fitz`) | `fig_p{page}_{idx}.ext` + `fig_{n:02d}_p{page}.png` | 从 PDF 直接抠出独立图片 |
+```
+# 1. 利用 MinerU content_list 识别真实图表
+#    打开 mineru_raw.json，查找 type:"image" 条目，
+#    通过 page_idx 确定图片位置，img_path 找到对应文件
+
+# 2. 清理和重命名
+mv assets/<hash_fig3>.jpg assets/fig_03_p19.png    # MinerU 图表 → 友好命名
+rm -f assets/page_*.png                              # 删除整页截图
+
+# 3. 检查是否有 PyMuPDF 嵌入式图片（fig_p*.*），优先使用
+#    嵌入图片通常分辨率更高。
+```
+
+**图片资产类型总览：**
+
+| 命名模式 | 来源 | 分辨率 | 优先级 | 说明 |
+|----------|------|--------|--------|------|
+| `fig_p{page}_{idx}.ext` | PyMuPDF 直接从 PDF 提取 | 高 | 🥇 | PDF中含嵌入图片对象时才有 |
+| `fig_{n:02d}_p{page}.png` | 手动从 MinerU 哈希重命名 | 中 | 🥈 | VLM 渲染的矢量图表 |
+| `<hash>.jpg` | MinerU API 原始输出 | 中 | ❌ 原文件名 | 需要重命名后才使用 |
+| `page_*.png` | PyMuPDF 整页渲染 | 低 | ❌ 不使用 | 包含界面 chrome，非论文插图 |
 
 详细 API 文档见 `MinerU-api/api.md`。
 
@@ -507,13 +566,77 @@ python3 mineru_parse.py path/to/paper.pdf docs/paper/论文目录
 □ paper.md 以 ## 阅读提示 结尾（或至少有一个总结段落）
 □ paper.md 没有使用废弃格式（**原文 (Chinese):** 等）
 □ paper.md 图片放在所属章节末尾，不跨节边界（见 §2.7）
+□ paper.md 的所有图片路径仅使用 fig_ 开头（无 page_ 引用）
 □ source_map.json 存在且格式为标准 schema（如适用）
 □ source_map.json 的 blocks 键名与 paper.md 的锚点 ID 一致
 □ source_map.json 的 figures/tables 覆盖 paper.md 全部图片（见 §3.8）
 □ source_map.json 每个 figure/table 条目有含义明确的 description
-□ assets/ 存在且包含所有引用的图片
+□ source_map.json figures 段的 asset 指向 fig_* 而非哈希文件名
+□ assets/ 中无 page_*.png 残留
+□ assets/ 中所有 fig_* 文件存在且可打开
 □ 运行 node build-reader.js 无报错
 □ 双击 paper-reader.html 验证渲染
 ```
 
 ---
+
+## 6. 常见陷阱与经验教训（2026-05 更新）
+
+> 本节记录实际执行中遇到的坑，供后续处理时参考。
+
+### 6.1 图片处理
+
+| 陷阱 | 后果 | 正确做法 |
+|------|------|----------|
+| 直接在 paper.md 中用 `assets/page_02.png` | 整页截图包含页眉页脚、菜单栏，不是论文插图 | 改为 `fig_p2_0.jpeg`（嵌入图片）或 `fig_02_p2.png`（MinerU 渲染） |
+| 认为 MinerU assets/ 中所有图片都是论文插图 | 会把公式截图、装饰元素也当作论文图 | 通过 content_list 中 type:"image" 且 img_path 以 "images/" 开头的项来识别 |
+| 使用 MinerU 哈希文件名直接引用 | paper.md 中的路径不易读，后续维护困难 | 重命名为 `fig_{n:02d}_p{page}.png` |
+| 忽略了 PyMuPDF 提取的 `fig_p*.*` | 用了低分辨率的 MinerU 渲染图 | 优先检查 assets/ 中是否有 `fig_p*.ext`，嵌入图片通常分辨率更高 |
+
+### 6.2 MinerU content_list 解读
+
+MinerU 返回的 `content_list` 是定位论文插图的关键数据结构：
+
+```json
+{
+  "type": "image",
+  "page_idx": 18,              // 0-indexed → 实际页码 = page_idx + 1 = 19
+  "img_path": "images/5ce6...",// 以 "images/" 开头 = 真实图表，否则忽略
+  "text": "Figure 3. DMD temporal profile of..."  // 图片描述
+}
+```
+
+**区分规则：**
+- ✅ `img_path` 以 `images/` 开头且有 `text` 描述 → 真实插图
+- ❌ 只有 `page_idx`、无 `img_path` → 装饰性元素，忽略
+
+### 6.3 source_map.json 精修要点
+
+MinerU 自动生成的 source_map.json 需修正：
+
+| 问题 | MinerU 默认 | 修正为 |
+|------|-------------|--------|
+| 图号 | `F01`, `F02` | `F001`, `F002`（三位数，与 S###/T### 一致） |
+| 图数量 | 可能遗漏（只含 content_list 中有 img_path 的项） | 对照论文实际图号，补充 F001~F008 |
+| description | `Figure 1 (p2)` | `图1 \| ChronoMedKG 整体框架：...`（中文含义描述） |
+| asset 路径 | `assets/<hash>.jpg` | `assets/fig_p2_0.jpeg` |
+
+### 6.4 最终运行 build-reader.js
+
+**最容易被遗忘的步骤。** paper-reader 的前端数据来自 `papers-data.js`，不运行则文档改动不会反映到界面。
+
+```bash
+# 在工作目录执行
+node build-reader.js
+
+# 预期输出：
+# 📡 Scanning papers...
+# ✅ Wrote papers-index.json (N papers)
+# ✅ Wrote papers-data.js (XXX KB)
+# 🎉 Done! Double-click paper-reader.html to use.
+```
+
+| 错误 | 原因 | 修复 |
+|------|------|------|
+| 新论文不显示 | 没重新运行 build-reader.js | `node build-reader.js` |
+| 图片显示破裂 | asset 路径不对或文件缺失 | 检查 paper.md 路径与 assets/ 文件是否一致 |
