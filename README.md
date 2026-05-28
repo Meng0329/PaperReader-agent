@@ -11,8 +11,8 @@
 ### 1. 配环境
 
 ```bash
-git clone <repo>
-cd paper-reader
+git clone https://github.com/Meng0329/PaperReader-agent.git
+cd PaperReader-agent
 
 # Python 依赖（MinerU PDF 解析需要）
 pip3 install PyMuPDF
@@ -63,7 +63,7 @@ open paper-reader.html
 ## 目录结构
 
 ```
-paper-reader/
+PaperReader-agent/
 ├── paper-reader.html     # 阅读器（双击打开，无需服务器）
 ├── build-reader.js       # 索引构建（新论文后执行）
 ├── mineru_parse.py       # PDF 解析脚本

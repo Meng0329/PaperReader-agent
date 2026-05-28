@@ -11,8 +11,8 @@
 ### 1. Setup
 
 ```bash
-git clone <repo>
-cd paper-reader
+git clone https://github.com/Meng0329/PaperReader-agent.git
+cd PaperReader-agent
 
 # Python dependencies (for MinerU PDF parsing)
 pip3 install PyMuPDF
@@ -63,7 +63,7 @@ That's it.
 ## Directory Structure
 
 ```
-paper-reader/
+PaperReader-agent/
 ├── paper-reader.html     # Reader (double-click, no server needed)
 ├── build-reader.js       # Index builder (run after adding a paper)
 ├── mineru_parse.py       # PDF parsing script
