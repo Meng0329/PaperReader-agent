@@ -395,20 +395,20 @@ Step 1: PDF 获取
   └── 放入论文目录，重命名为清晰文件名（可选）
 
 Step 2: 文档解析（双通道）
-  ├── 用法: python3 docs/paper/docling_parse.py <PDF> <输出目录>
+  ├── 用法: python3 mineru_parse.py <PDF> <输出目录>
   │
-  ├── 通道 A — Docling API
-  │   ├── 上传 PDF → POST /v1/convert/file
-  │   ├── 输出: docling_raw.md + docling_raw.json + assets/page_*.png
-  │   └── do_formula_enrichment=true 尝试公式 LaTeX 识别
+  ├── 通道 A — MinerU API (VLM+OCR)
+  │   ├── 上传 PDF → POST /v1/file_parse
+  │   ├── 输出: mineru_raw.md + mineru_raw.json + content_list
+  │   └── formula_enable=true 启用公式解析, table_enable=true 启用表格提取
   │
   ├── 通道 B — PyMuPDF
   │   ├── 直接从 PDF 文件提取嵌入的独立图片
   │   ├── 输出: assets/fig_p{page}_{idx}.ext
-  │   └── 按 Docling 检测顺序生成 alias: assets/fig_{n:02d}_p{page}.png
+  │   └── 按 MinerU content_list 检测顺序生成 alias: assets/fig_{n:02d}_p{page}.png
   │
   ├── 自动生成: source_map.json（章节锚点 + 图片/表格索引）
-  └── 验证：检查 docling_raw.md 正文完整性 + assets/ 图是否齐全
+  └── 验证：检查 mineru_raw.md 正文完整性 + assets/ 图是否齐全
 
 Step 3: 中英对照翻译（nature-reader / 人工精校）
   ├── 依据 source_map.json 的锚点结构，逐段翻译
@@ -447,14 +447,14 @@ Step 6: 索引重建
 
 ### 4.3 一键解析脚本
 
-使用 `docs/paper/docling_parse.py` 自动完成整个解析流程：
+使用 `mineru_parse.py` 自动完成整个解析流程：
 
 ```bash
 # 安装依赖（只需一次）
 pip3 install PyMuPDF
 
-# 解析 PDF（双通道：Docling API 文本 + PyMuPDF 图片）
-python3 docs/paper/docling_parse.py path/to/paper.pdf docs/paper/论文目录
+# 解析 PDF（双通道：MinerU API 文本 + PyMuPDF 图片）
+python3 mineru_parse.py path/to/paper.pdf docs/paper/论文目录
 ```
 
 执行后自动生成：
@@ -463,10 +463,10 @@ python3 docs/paper/docling_parse.py path/to/paper.pdf docs/paper/论文目录
 论文目录/
 ├── paper.md              # 中英对照阅读笔记（需人工/LLM 翻译后填充）
 ├── source_map.json       # 自动生成的结构化索引
-├── docling_raw.md        # Docling API 返回的 Markdown 原文
-├── docling_raw.json      # Docling API 返回的结构化 JSON
+├── mineru_raw.md         # MinerU API 返回的 Markdown 原文
+├── mineru_raw.json       # MinerU API 返回的结构化 JSON
 ├── assets/
-│   ├── page_01.png       # 全页渲染图（Docling API）
+│   ├── page_01.png       # 全页渲染图（MinerU API）
 │   ├── fig_01_p34.png    # 独立图片（PyMuPDF），按检测顺序命名
 │   ├── fig_02_p34.png    #   fig_NN_p{page}.png 格式
 │   └── ...               #   paper.md 中直接引用此命名
@@ -477,10 +477,10 @@ python3 docs/paper/docling_parse.py path/to/paper.pdf docs/paper/论文目录
 
 | 通道 | 工具 | 产出 | 作用 |
 |------|------|------|------|
-| A | Docling API `/v1/convert/file` | `docling_raw.md/.json`, `page_*.png` | 文本提取、结构分析、全页渲染 |
+| A | MinerU API `/v1/file_parse` | `mineru_raw.md/.json`, `content_list` | VLM+OCR 文本提取、结构分析、图片/表格识别 |
 | B | PyMuPDF (`fitz`) | `fig_p{page}_{idx}.ext` + `fig_{n:02d}_p{page}.png` | 从 PDF 直接抠出独立图片 |
 
-详细 API 文档见 `docs/docling/api.md`。
+详细 API 文档见 `MinerU-api/api.md`。
 
 ### 4.4 中文笔记版（Type B → Type A 升级路径）
 
@@ -488,7 +488,7 @@ python3 docs/paper/docling_parse.py path/to/paper.pdf docs/paper/论文目录
 
 ```
 1. 找到原始 PDF（或 arXiv 链接）
-2. 执行 Step 2-4（Docling API + nature-reader 翻译）
+2. 执行 Step 2-4（MinerU API + nature-reader 翻译）
 3. 将 paper.md 替换为标准格式
 4. 添加 source_map.json
 5. 验证 paper-reader 渲染一切正常

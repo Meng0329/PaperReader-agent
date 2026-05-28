@@ -2035,9 +2035,24 @@ p code, li code, .block.plain code {
   function renderInlineContent(text) {
     if (!text) return '';
 
-    // === Auto-detect LaTeX-like formulas WITHOUT $ delimiters ===
     var mathExprs = [], processed = text;
-    // Three-pass detection: (1) complex formulas, (2) simple formulas, (3) inline wrapping
+
+    // === STEP 0: Protect already-delimited $...$ / $$...$$ from auto-detection ===
+    // Pre-extract existing math so auto-detection passes below never see $ delimiters.
+    // This prevents double-wrapping (e.g. $m_i$ → auto-detect → $$m_i$$ display math).
+    processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, function(_, m) {
+      var i = mathExprs.length;
+      mathExprs.push(m.trim());
+      return '##MATHB' + i + '##';
+    });
+    processed = processed.replace(/\$(.+?)\$/g, function(_, m) {
+      var i = mathExprs.length;
+      mathExprs.push(m.trim());
+      return '##MATHI' + i + '##';
+    });
+
+    // === Auto-detect LaTeX-like formulas WITHOUT $ delimiters ===
+    // (Existing $…$ are already extracted → no risk of double-wrapping)
     processed = processed.split('\n').map(function(line) {
       if (!line.trim() || /\$\$/.test(line)) return line;
       if (/^\s*(?:#|\*|-|\d+\.|>)/.test(line)) return line; // headings, lists, blockquotes
@@ -2114,6 +2129,7 @@ p code, li code, .block.plain code {
       });
       return result;
     }).join('\n');
+    // Extract any NEW math added by auto-detection passes
     processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, function(_, m) {
       var i = mathExprs.length;
       mathExprs.push(m.trim());

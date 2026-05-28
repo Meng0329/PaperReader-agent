@@ -1,12 +1,12 @@
 # PaperReader-agent
 
-A literature paper reading tool with Chinese-English side-by-side reader, PDF parsing via MinerU/Docling, and automated index building.
+A literature paper reading tool with Chinese-English side-by-side reader, PDF parsing via MinerU, and automated index building.
 
 ## Files
 
 - `paper-reader.html` — Main reader interface (Chinese-English side-by-side)
 - `build-reader.js` — Index builder: scans paper directories, generates `papers-data.js`
-- `docling_parse.py` — PDF parsing script using Docling/MinerU
+- `mineru_parse.py` — PDF parsing script using MinerU API (VLM+OCR)
 - `workflow-spec.md` — Workflow specification and operation guide
 - `papers-data.js` — Generated paper index (loaded by reader)
 - `papers-index.json` — Paper metadata index
